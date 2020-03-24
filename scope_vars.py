@@ -2,10 +2,30 @@
 
 from __future__ import print_function
 
-from fs_lib import *
 import re
 from pykdump.API import *
+import argparse
 
+
+def indent_string(text, num=1):
+	spacer = "\t"*num
+
+	return "\n".join(spacer + line for line in text.split("\n"))
+
+def get_arg_value(arg):
+	try:
+		if '.' in arg:
+			return float(arg)
+		if arg.lower().startswith('0x'):
+			return int(arg, 16)
+		if arg.startswith('0') and all(c in string.octdigits for c in arg):
+			return int(arg, 8)
+#               if all(c in string.intdigits for c in arg): ### stupid python doesn't have string.intdigits?
+		if all(c in '0123456789' for c in arg):
+			return int(arg, 10)
+		return int(arg, 16)
+	except ValueError:
+		return 0
 
 def previous_insn_addr(addr):
 	prev_addr = 0
@@ -49,6 +69,26 @@ def addr_func(addr):
 			pass
 	return ""
 
+def func_addr(func):
+	# try getting the addr using 'p', so we can handle addresses such as 'path_walk+0x8'
+	l = exec_crash_command("p &{}".format(func)).split("\n")
+
+	if len(l) == 2:
+		result = l[1]
+	elif len(l) == 1:
+		result = l[0]
+	else:
+		print("unable to find address for '{}'".format(func))
+		return 0
+
+	m = re.match("^(\$[0-9]+)? = {(?P<prototype>.+?)} (?P<addr>0x[0-9a-fA-F]+) <(?P<loc_str>[^>]+)>$", result)
+
+	if m:
+		addr = get_arg_value(m.groups('addr'))
+		return addr
+	return 0
+
+
 def func_string(fname):
 	vi = whatis(fname)
 	out = []
@@ -57,279 +97,172 @@ def func_string(fname):
 		out.append("{} {}{}".format(astype, apref, asuff).strip())
 	return "{} {}({})".format(out[0], fname, ", ".join(out[1:]))
 
-#m = re.match("^  \[([0-9a-f]{16})\]$", line)
-#if m:
-#addr = int(m.group(1), 16)
+
+multiloc_re_str = r"(?P<is_multiloc>multi-location):(?P<multiloc_content>.+?)^, length (?P<multiloc_len>[0-9]+)\."
+complex_re_str = r"a (?P<is_complex>complex DWARF expression):(?P<complex_content>.+?)^, length (?P<complex_len>[0-9]+)\."
+label_re_str = r"a (?P<is_label>label) at address (?P<label_addr>0x[0-9a-fA-F]+), length (?P<label_len>[0-9]+)\."
+function_re_str = r"a (?P<is_function>function) at address (?P<function_addr>0x[0-9a-fA-F]+), length (?P<function_len>[0-9]+)\."
+optimized_re_str = r"(?P<is_optimized>optimized out)\."
+
+scope_re_str = r"Symbol (?P<symbol_name>[a-zA-Z_][a-zA-Z0-9_]*) is (?P<content>" + \
+	multiloc_re_str + r"|" + complex_re_str + r"|" + label_re_str + r"|" + \
+	function_re_str + r"|" + optimized_re_str + r")"
+
+
+multiloc_range_complex_re_str = r"(?P<is_complex>complex) DWARF expression:\n(?P<dwarf_expr>.+?)^$"
+multiloc_register_re_str = r"(?P<in_register>variable) in (?P<register_name>\$.+?)$"
+
+multiloc_range_re_str = "Range (?P<range_start>0x[0-9a-fA-F]+)-(?P<range_end>0x[0-9a-fA-F]+): a " + \
+	r"(" + multiloc_range_complex_re_str + r"|" + multiloc_register_re_str + r")"
+
 
 def decode_complex(complex_expr):
-	print("how do we decode this?\n{}".format(complex_expr))
+#	print("how do we decode this?\n{}".format(complex_expr))
+	return indent_string(complex_expr)
 
 
 def get_text_addr_vars(func, text_addr):
+	indent_str = "\t"
+	indent_str2 = "\t\t"
 	print("")
 	print("checking symbols in scope at 0x{:016x} in '{}'".format(text_addr, func))
+	print("{}{}".format(indent_str, func_string(func)))
 	print("")
 
 	r = exec_crash_command("gdb info scope *0x{:016x}".format(text_addr))
 
-
-
-
-	cur_sym = ""
-	loc_strings = []
-	sym_size = 0
-	multi_loc = 0
-	sym_in_scope = 0
-	parsing_complex = 0
-	is_func = 0
-
 	m = re.match("^Scope for (\*0x[0-9a-fA-f]+):$[\n\r]+(.+)$", r, flags=re.MULTILINE + re.DOTALL)
 	if not m:
-		print("Unable to match scope")
-		return 0
+		print("{}Unable to match".format(indent_str2))
+		return
 	if m.group(1) != "*0x{:016x}".format(text_addr):
-		print("Unable to match desired scope '*0x{:016x}' with returned '{}'".format(text_addr, m.group(1)))
-		return 0
-
-	print("something matched: {}".format(m))
+		print("{}Unable to match desired scope '*0x{:016x}' with returned '{}'".format(indent_str2, text_addr, m.group(1)))
+		return
 
 	sym_text = m.group(2)
 
-	sym_re_str = "^Symbol ([a-zA-Z_][a-zA-Z0-9_]*) is "
-
-	is_mult_loc_str = "(multi-location):$.+?^, length ([0-9]+)\.$"
-	is_label_re_str = "a (label) at address 0x[0-9a-fA-F]+, length ([0-9]+)\.$"
-	is_func_re_str = "a (function) at address 0x[0-9a-fA-F]+, length ([0-9]+)\.$"
-#	is_func_re_str = "a (function).+?\.$"
-	is_opt_out_str = "(optimized out)\.$"
-
-
-	full_pattern = "(" + sym_re_str + "(" + \
-		"{}".format(is_mult_loc_str) + "|" + \
-		"{}".format(is_label_re_str) + "|" + \
-		"{}".format(is_func_re_str) + "|" + \
-		"{}".format(is_opt_out_str) + \
-		")?)+"
-#	"{})*".format(is_mult_loc_str)
-	print("regex pattern is '{}'".format(full_pattern))
-	rex = re.compile(full_pattern, re.MULTILINE | re.DOTALL)
-
-#'(^Symbol ([a-zA-Z_][a-zA-Z0-9_]*) is ((multi-location):$.+?^, length [0-9]+\.$|a (label) at address 0x[0-9a-fA-F]+, length [0-9]+\.$))*?'
-#(^Symbol ([a-zA-Z_][a-zA-Z0-9_]*) is ((multi-location):$.+?^, length [0-9]+\.$|a (label) at address 0x[0-9a-fA-F]+, length [0-9]+\.$|is (optimized out)))+
-
-
-#	m = re.match("^Symbol ([a-zA-Z_][a-zA-Z0-9_]*) is (" + "{})", sym_text, flags=re.MULTILINE + re.DOTALL)
-#	m = re.match(full_pattern, sym_text, flags=re.MULTILINE + re.DOTALL)
+	rex = re.compile(scope_re_str, re.MULTILINE | re.DOTALL)
 
 	for match in rex.finditer(sym_text):
-#		cur_sym, part2, part3 = match.groups()
-#		cur_sym = cur_sym.strip()
+		current_sym = match.group('symbol_name')
 
-#		print("Symbol: {}".format(cur_sym))
-#		print("{}".format(match.groups()))
+		if match.group('is_multiloc'):
+#			print("\tmultiloc symbol, len {}".format(match.group('multiloc_len')))
+			locations = []
+			multiloc_content = match.group('multiloc_content')
 
-		print("match: symbol {}".format(match.group(2)))
-#		print("\t1) {}".format(match.group(1)))
-		for i in xrange(1,12):
-			try:
-				print("\t{}) {}".format(i, match.group(i)))
-			except:
-				pass
+			for range_match in re.finditer(multiloc_range_re_str, multiloc_content, re.MULTILINE | re.DOTALL):
+				range_start = get_arg_value(range_match.group('range_start'))
+				range_end = get_arg_value(range_match.group('range_end'))
 
-		symbol = match.group(2)
-
-
-		if match.group(4) is "multi-location":
-			print("multilocation thingy")
-#		elif match.group(10) is not None:
-#			print("{}:\n\toptimized out")
-
-
-
-#	if m:
-#		print("got a match: {}".format(m.groups(1)))
-#		print("2 {}".format(m.group(2)))
-#		print("3 {}".format(m.group(3)))
-
-		print("")
-		continue
-
-
-	print("***************************")
-
-	return
-
-	for l in r.strip().split("\n"):
-		f = l.strip().split(" ")
-		if f[0] == "Scope":
-			if f[2] != "*0x{:016x}:".format(text_addr):
-#			if f[2] != "{}:".format(func):
-				print("Hmm... supposed to be scope for '*0x{:016x}', but this says '{}'".format(text_addr, f[2]))
-#				print("Hmm... supposed to be scope for '{}', but this says '{}'".format(func, f[2]))
-		elif f[0] == "Symbol":
-			cur_sym = f[1]
-			multi_loc = 0
-			is_func = 0
-			# Symbol ret__ is multi-location:
-			if f[3] == "multi-location:":
-				multi_loc = 1
-			# Symbol get_current is a function at address 0xffffffff811ab249, length 1.
-			elif "{} {} {}".format(f[2], f[3], f[4]) == "is a function":
-#			f[4] == "function":
-				m = re.match("^(0x[0-9a-fA-F]+),$", f[7])
-				is_func = 1
-				if m:
-					func_call_addr = get_arg_value(m.group(1))
-					print("{}:\n\tfunction at 0x{:016x}".format(cur_sym, func_call_addr))
-
-					print("\t\t{}".format(func_string(addr_func(func_call_addr))))
-#					fn_tmp = addr_func(func_call_addr)
-#					print("\t\tfn_tmp = {}".format(fn_tmp))
-#					vi = whatis(fn_tmp)
-#					vi = whatis(fn_tmp)
-
-#					out = []
-#					for ati in vi.ti.prototype:
-#						astype, apref, asuff = ati.fullname()
-#						out.append(("%s %s%s" % (astype, apref, asuff)).strip())
-
-#					print("{} {}({});".format(out[0], fn_tmp, ", ".join(out[1:])))
-
-
-#					print("\t\t{}".format(whatis(addr2sym(func_call_addr))))
-
-					cur_sym = ""
-				else:
-					print("\tcouldn't find function address in '{}'".format(f[7]))
-			# Symbol save is optimized out.
-			elif "{} {} {}".format(f[2], f[3], f[4]) == "is optimized out.":
-				print("{}:\n\toptimized out".format(cur_sym))
-				cur_sym = ""
-			# Symbol save is a complex DWARF expression:
-			#      0: DW_OP_fbreg -64
-			# , length 16.
-			elif "{} {} {} {} {}".format(f[2], f[3], f[4], f[5], f[6]) == "is a complex DWARF expression:":
-				parsing_complex = 1
-			else:
-				print("Can't decode '{}'".format(l))
-
-
-#			print("symbol: {}".format(cur_sym))
-		elif f[0] == "Range":
-			r = f[1]
-			m = re.match("^(0x[0-9a-fA-F]+)-(0x[0-9a-fA-F]+):$", r)
-			if m:
-#				print("match: {}".format(m.group(0)))
-				start = get_arg_value(m.group(1))
-				end = get_arg_value(m.group(2))
-#				print("\tstart: 0x{:016x}".format(start))
-#				print("\tend:   0x{:016x}".format(end))
-#				print("\t\t{}".format(l))
-
-				if (text_addr >= start) and (text_addr <= end):
-#					print("\tsymbol is in scope: '{}'".format(l))
-				# now...  _where/what_ is it?
-#					print("\t... where?  '{}'".format(l))
-					m = re.match(".+: a variable in \$(.+)$", l)
-					if m:
-#						print("\tin register ${}".format(m.group(1)))
-						loc_strings.append("variable in register ${}".format(m.group(1)))
+				if range_start <= text_addr and text_addr <= range_end:
+					if range_match.group('in_register'):
+#						print("\tin register {}".format(range_match.group('register_name')))
+						locations.append("in register {}".format(range_match.group('register_name')))
 					else:
-						loc_strings.append("** {}".format(l))
-#				else:
-#					loc_strings.append("not in scope 0x{:016x}-0x{:016x}".format(start, end))
-
+						d = decode_complex(range_match.group('dwarf_expr'))
+						locations.append(d)
+			if len(locations) == 0:
+				print("{}{} - len {}: not in scope".format(indent_str, current_sym, match.group('multiloc_len')))
+			elif len(locations) == 1:
+				print("{}{} - len {}: {}".format(indent_str, current_sym, match.group('multiloc_len'), locations[0]))
 			else:
-				print("couldn't match: {}".format(r))
-		elif f[0] == ",":
-			if f[1] != "length":
-				print("uhhh... what's '{}'?".format(f[1]))
-			else:
-#				print("size: {}".format(f[2]))
-				size = f[2].rstrip(".")
-				print("{} (size {}):".format(cur_sym, size))
-				if parsing_complex:
-					print("\tcomplex calculation:")
-					for ls in loc_strings:
-						print("\t\t{}".format(ls))
-#				elif len(loc_strings) > 1:
-				elif len(loc_strings) > 0:
-#					print("")
-					for ls in loc_strings:
-						print("\t{}".format(ls))
-#				elif len(loc_strings) == 1:
-#					print("{}".format(loc_strings[0]))
-				else:
-					print("\tnot in scope")
-#					print("something... loc_strings='{}'".format(loc_strings))
+				print("{}{} - len {}:".format(indent_str, current_sym, match.group('multiloc_len')))
+				for loc in locations:
+					print("{}* {}".format(indent_str2, loc))
 
-				cur_sym = ""
-				loc_strings = []
-				parsing_complex = 0
-		elif parsing_complex:
-#			print("{}".format(l))
-			loc_strings.append(l)
+		elif match.group('is_complex'):
+			d = decode_complex(match.group('complex_content'))
+			print("{}{} - len {}: {}".format(indent_str, current_sym, match.group('complex_len'), d))
+		elif match.group('is_label'):
+			print("{}{} - len {}: label at {}".format(indent_str, current_sym, match.group('label_len'), match.group('label_addr')))
+#			print("\tlabel at {} (len: {})".format(match.group('label_addr'), match.group('label_len')))
+		elif match.group('is_function'):
+			print("{}{} - len {}: function at {}".format(indent_str, current_sym, match.group('function_len'), match.group('function_addr')))
+#			print("\tfunction at {} (len: {})".format(match.group('function_addr'), match.group('function_len')))
+		elif match.group('is_optimized'):
+			print("{}{}: optimized out".format(indent_str, current_sym))
 		else:
-			print("couldn't match: first field '{}' in '{}'".format(f[0], f))
-			print("\tstring: '{}'".format(l))
+			print("Why did this match then? {}".format(match.group('content')))
+
+
+def print_full_func_info(func):
+	try:
+		print("\tgdb_typeinfo: {}".format(crash.gdb_typeinfo(prev_func)))
+	except:
+		pass
+	vi = whatis(func)
+	print("\twhatis: {}".format(vi))
+	print("\twhatis.shortstr: {}".format(vi.shortstr()))
+	print("\twhatis.ti: {}".format(vi.ti))
+
+	print("\twhatis.fullstr: {}".format(vi.fullstr())) # fails with 'VarInfo' has no 'offset'
+	tt = vi.ti.getTargetType() # fails with PyKdump/GDB error in gdb_typeinfo
+	print("\ttarget type; {}".format(tt))
+	ti.dump() # dies with error
+
+	ti = vi.ti
+	print("\ttype fullname: {}".format(ti.fullname()))
+	print("\ttype typestr: {}".format(ti.typestr()))
+	print("\ttype fullstr: {}".format(ti.fullstr()))
+	print("\twhatis ti.details: {}".format(vi.ti.details))
+	print("\targs: {}".format(funcargs(func)))
 
 
 # eventually want to pass the pid so we can go the whole way
 # for now, just get what's in scope
 #def get_scope(pid, addr):
-def get_scope(addr):
-
-	func = addr_func(addr)
-	if addr == 0xffffffff811a9a5f:
-		prev_addr = 0xffffffff811a9a5a
-	elif addr == 0xffffffff811ab29a:
-		prev_addr = 0xffffffff811ab295
-	elif addr == 0xffffffffa0cc00e9:
-		prev_addr = 0xffffffffa0cc00e4
-	else:
-		prev_addr = previous_insn_addr(addr)
-	if prev_addr is not 0:
-		prev_func = addr_func(prev_addr)
-		if func != prev_func:
-			print("func at 0x{:016x} is '{}', but func at 0x{:016x} is '{}'"
-				.format(prev_addr, prev_func, addr, func))
-			return 0
-		print("func: {}".format(prev_func))
-#		vi = whatis(prev_func)
-#		print("\twhatis: {}".format(vi))
-#		print("\twhatis.shortstr: {}".format(vi.shortstr()))
-#		print("\twhatis.ti: {}".format(vi.ti))
-
-#		print("\twhatis.fullstr: {}".format(vi.fullstr())) # fails with 'VarInfo' has no 'offset'
-#		tt = vi.ti.getTargetType() # fails with PyKdump/GDB error in gdb_typeinfo
-#		print("\ttarget type; {}".format(tt))
-#		ti.dump() # dies with error
-
-#		ti = vi.ti
-#		print("\ttype fullname: {}".format(ti.fullname()))
-#		print("\ttype typestr: {}".format(ti.typestr()))
-#		print("\ttype fullstr: {}".format(ti.fullstr()))
-#		print("\twhatis ti.details: {}".format(vi.ti.details))
-#		print("\targs: {}".format(funcargs(prev_func)))
+def get_scope(func, addr):
+#	print("func: {}".format(func))
+	get_text_addr_vars(func, addr)
 
 
-		try:
-			print("\tgdb_typeinfo: {}".format(crash.gdb_typeinfo(prev_func)))
-		except:
-			pass
-
-
-		get_text_addr_vars(prev_func, prev_addr)
-	else:
-		print("previous addr to {:016x}: {}".format(addr, prev_addr))
-
-#	for entry in exec_crash_command("sym {:016x}".format(addr)).split("\n"):
-
+# -p <pid>
+# -r - address(es) given is a return address...get the scope for the previous instruction
+#      currently the default
 
 
 if __name__ == "__main__":
-        try:
-		get_scope(get_arg_value(sys.argv[1]))
+	try:
+#		opts_parser = argparse.ArgumentParser(version='0.01')
+		opts_parser = argparse.ArgumentParser()
+		opts_parser.add_argument('addrs', metavar='N', type=str, nargs='+',
+			help='addresses for which to display scope')
+		opts_parser.add_argument('--return', '-r', dest='return_addr', default=False, action='store_true',
+			help='the address(es) is a return address, so get scope of previous instrution')
+
+		args = opts_parser.parse_args()
+
+		if len(args.addrs) < 1:
+			print("usage: scope_vars [--return | -r] <address> [<address> ... ]")
+			sys.exit(1)
+
+		for req_addr_str in args.addrs:
+			req_addr = get_arg_value(req_addr_str)
+			if req_addr == 0:
+				# try again by using the string as a symbol name/formula
+				req_addr = func_addr(req_addr_str)
+				if req_addr == 0:
+					print("Can't get scope for '{}'".format(req_addr_str))
+					continue
+			req_func = addr_func(req_addr)
+			check_addr = req_addr
+			if args.return_addr == True:
+				print("getting previous instruction address")
+				prev_addr = previous_insn_addr(req_addr)
+				check_addr = prev_addr
+				if prev_addr != 0:
+					prev_func = addr_func(prev_addr)
+					if req_func != prev_func:
+						print("func at 0x{:016x} is '{}', but func at 0x{:016x} is '{}'".format(
+							req_addr, req_func, prev_addr, prev_func))
+
+						check_addr = 0
+#				else:
+#					print("Unable to determine address of previous instruction to 0x{:016x}".format(req_addr))
+			if check_addr:
+				get_scope(req_func, check_addr)
+
 	except crash.error as e:
 		print("failed: '{}'".format(sys.argv))
 		print("error: {}".format(e))
