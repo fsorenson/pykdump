@@ -384,26 +384,38 @@ def find_recurse(path="/", addr=0, depth=1):
 
 	dentry = readSU("struct dentry", addr)
 
-#	output_stat_info(path, dentry, dentry.d_inode)
+	subdirs_offset = container_of(0, "struct dentry", "d_child")
 
-	d_subdirs_head = dentry.d_subdirs
+	try:
+		d_subdirs_head = int(dentry.d_subdirs)
+		if d_subdirs_head == 0:
+			return
+	except:
+		sys.exit()
 
-	tmp_subdirs = readListByHead(d_subdirs_head, maxel=maxel)
-	for tmp_entry in tmp_subdirs:
+	next = d_subdirs_head
+	while 42:
 		try:
-			dentry = readSU("struct dentry", container_of(tmp_entry, "struct dentry", "d_u"))
+			next = readPtr(next)
+		except crash.error as e:
+			print("error: {}".format(e))
+			print(e)
+			break
+#		print("here 7 - next: 0x{:016x}, head: 0x{:016x}".format(next, d_subdirs_head))
+		if (next == 0) or (next == d_subdirs_head):
+			break
+		try:
+			dentry = readSU("struct dentry", next + subdirs_offset)
 			inode = dentry.d_inode
-		except:
+		except Exception as e:
+			print("error in find_recurse: {}".format(e))
 			raise
 			inode = 0
 			pass
-
-		# was the filename embedded?  can we use the name?
 		dentry_name = get_dentry_name(dentry)
 		if len(dentry_name) == 0:
 			continue
 
-#		print("{}-byte string '{}' is printable, apparently".format(len(dentry_name), dentry_name));
 		new_path = path + "/" + dentry_name
 		output_stat_info(new_path, dentry, inode)
 
