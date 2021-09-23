@@ -6,11 +6,15 @@ from LinuxDump.fs.dcache import *
 import argparse
 
 __author__ = "Frank Sorenson <sorenson@redhat.com>"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 maxel = 2000000
 _MAXEL = maxel
 verbosity = 0
+DEBUG = 0
+maxdepth = 0
+recurse = True
+show_stale = True
 
 def rhel_major_version():
 	if sys_info.kernel >= "4.18.0" and sys_info.kernel <= "4.18.0":
@@ -372,11 +376,11 @@ def get_dentry_name(dentry):
 
 
 
-def find_recurse(path="/", addr=0):
+def find_recurse(path="/", addr=0, depth=1):
 	if addr == 0: return
+	if maxdepth > 0 and depth > maxdepth:
+		return
 
-#	print("find_recurse for path: {}; addr: {}".format(path, addr))
-#	return
 
 	dentry = readSU("struct dentry", addr)
 
@@ -406,10 +410,10 @@ def find_recurse(path="/", addr=0):
 		if inode:
 			try:
 				i_mode = inode.i_mode
-				itype = i_mode & S_IFMT
+				i_type = i_mode & S_IFMT
 
-				if S_ISDIR(inode.i_mode):
-					find_recurse(new_path, dentry)
+				if S_ISDIR(i_mode):
+					find_recurse(new_path, dentry, depth=depth+1)
 			except:
 				pass
 
@@ -422,7 +426,8 @@ def find_recurse_begin(path="/", addr=0):
 	path = "0x{:016x} ({})".format(dentry, dentry_name)
 
 	output_stat_info(path, dentry, dentry.d_inode)
-	find_recurse(path, dentry)
+	if recurse:
+		find_recurse(path, dentry)
 
 
 def get_arg_value(arg):
@@ -440,7 +445,10 @@ def get_arg_value(arg):
 
 if __name__ == "__main__":
 	opts_parser = argparse.ArgumentParser()
-	opts_parser.add_argument('--verbose', '-v', dest = 'verbose', default = 0, action = 'count')
+	opts_parser.add_argument('--verbose', '-v', dest = 'verbose', default = 0, action = 'count', help = "increase verbosity")
+	opts_parser.add_argument("--maxdepth", dest = 'maxdepth', type=int, default = -1, help = "set a maximum subdirectory depth")
+	opts_parser.add_argument("--nostale", dest = 'nostale', default = False, action = "store_true", help = "suppress display of stale entries")
+	opts_parser.add_argument("--norecurse", '-d', dest = 'norecurse', default = False, action = "store_true", help = "only show info for listed dentries")
 
 	addrs_parser = argparse.ArgumentParser()
 	addrs_parser.add_argument('addrs', action = 'store', nargs = '*')
@@ -449,10 +457,18 @@ if __name__ == "__main__":
 	opts = addrs_parser.parse_args(remain, opts)
 
 	verbose = opts.verbose
+	maxdepth = opts.maxdepth
+	show_stale = not(opts.nostale)
+	if opts.norecurse:
+		recurse = False
 
 	for addr_str in opts.addrs:
-		addr = get_arg_value(addr_str)
-		if addr:
-			find_recurse_begin("0x{:016x}".format(addr), addr)
+		try:
+
+			addr = get_arg_value(addr_str)
+			if addr:
+				find_recurse_begin("0x{:016x}".format(addr), addr)
+		except Exception as e:
+			print("error: {}".format(e))
 
 # vim: sw=4 ts=4 noexpandtab
