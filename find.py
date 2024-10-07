@@ -223,6 +223,124 @@ INO_FLAGS = CDefine(INO_FLAGS_C)
 #print("ino_flags_c: {}".format(INO_FLAGS_C))
 #print("INO_FLAGS: {}".format(INO_FLAGS))
 
+PROCESS_FLAGS_C = '''
+#define PF_IDLE                 0x00000002      /* I am an IDLE thread */
+#define PF_EXITING              0x00000004      /* Getting shut down */
+#define PF_VCPU                 0x00000010      /* I'm a virtual CPU */
+#define PF_WQ_WORKER            0x00000020      /* I'm a workqueue worker */
+#define PF_FORKNOEXEC           0x00000040      /* Forked but didn't exec */
+#define PF_MCE_PROCESS          0x00000080      /* Process policy on mce errors */
+#define PF_SUPERPRIV            0x00000100      /* Used super-user privileges */
+#define PF_DUMPCORE             0x00000200      /* Dumped core */
+#define PF_SIGNALED             0x00000400      /* Killed by a signal */
+#define PF_MEMALLOC             0x00000800      /* Allocating memory */
+#define PF_NPROC_EXCEEDED       0x00001000      /* set_user() noticed that RLIMIT_NPROC was exceeded */
+#define PF_USED_MATH            0x00002000      /* If unset the fpu must be initialized before use */
+#define PF_USED_ASYNC           0x00004000      /* Used async_schedule*(), used by module init */
+#define PF_NOFREEZE             0x00008000      /* This thread should not be frozen */
+#define PF_FROZEN               0x00010000      /* Frozen for system suspend */
+#define PF_KSWAPD               0x00020000      /* I am kswapd */
+#define PF_MEMALLOC_NOFS        0x00040000      /* All allocation requests will inherit GFP_NOFS */
+#define PF_MEMALLOC_NOIO        0x00080000      /* All allocation requests will inherit GFP_NOIO */
+#define PF_LOCAL_THROTTLE       0x00100000      /* Throttle writes only against the bdi I write to,
+                                                 * I am cleaning dirty pages from some other bdi. */
+#define PF_KTHREAD              0x00200000      /* I am a kernel thread */
+#define PF_RANDOMIZE            0x00400000      /* Randomize virtual address space */
+#define PF_SWAPWRITE            0x00800000      /* Allowed to write to swap */
+#define PF_MEMSTALL             0x01000000      /* Stalled due to lack of memory */
+#define PF_NO_SETAFFINITY       0x04000000      /* Userland is not allowed to meddle with cpus_mask */
+#define PF_MCE_EARLY            0x08000000      /* Early kill for mce process policy */
+#define PF_MEMALLOC_NOCMA       0x10000000      /* All allocation request will have _GFP_MOVABLE cleared */
+#define PF_IO_WORKER            0x20000000      /* Task is an IO worker */
+#define PF_MUTEX_TESTER         0x20000000      /* Thread belongs to the rt mutex tester */
+#define PF_FREEZER_SKIP         0x40000000      /* Freezer should not count it as freezable */
+#define PF_SUSPEND_TASK         0x80000000      /* This thread called freeze_processes() and should not be frozen */
+'''
+PROCESS_FLAGS = CDefine(PROCESS_FLAGS_C)
+
+
+
+vmemmap_vaddr = 0
+vmemmap_end = 0
+kvbase = 0
+page_struct_size = 0
+
+def get_vmemmap_addrs():
+	global vmemmap_vaddr
+	global vmemmap_end
+	global kvbase
+	global page_struct_size
+
+	for l in exec_crash_command("help -m").split("\n"):
+		if l != '':
+			tmp = l.split(": ")
+			if len(tmp) == 2:
+				key = tmp[0].strip()
+
+				match = re.search('^([0-9a-fA-F]+)', tmp[1].strip())
+				if match:
+					val = get_arg_value(match.group(1))
+
+					if DEBUG:
+						print("*{}* => *{}*".format(key, val))
+
+					if key == 'vmemmap_vaddr':
+						vmemmap_vaddr = val
+						if DEBUG:
+							print("got vmemmap_vaddr: 0x{:016x}".format(vmemmap_vaddr))
+					elif key == 'vmemmap_end':
+						vmemmap_end = val
+						if DEBUG:
+							print("got vmemmap_end: 0x{:016x}".format(vmemmap_end))
+					elif key == 'kvbase':
+						kvbase = val
+						if DEBUG:
+							print("got kvbase: 0x{:016x}".format(kvbase))
+			page_struct_size = struct_size("struct page")
+	if vmemmap_vaddr == 0 or vmemmap_end == 0:
+		print("Error attempting to get vmemmap start and endpoints")
+
+def page_address(page_addr):
+	global vmemmap_vaddr
+	global vmemmap_end
+	global kvbase
+	global page_struct_size
+
+#	print("getting page address for 0x{:016x}".format(page_addr))
+
+	if vmemmap_vaddr == 0:
+		get_vmemmap_addrs()
+
+#	print("vmemmap_vaddr: 0x{:016x}, vmemmap_end: 0x{:016x}, kvbase: 0x{:016x}".format(vmemmap_vaddr, vmemmap_end, kvbase))
+
+
+	# oops...  still don't have this address.  can't continue
+	if vmemmap_vaddr == 0:
+		return 0
+
+	# get start of the page structs
+	# help -m | grep vmemmap_vaddr
+
+	# get page struct offset
+	# *page - vmemmap_vaddr
+
+	# phys page number is page struct offset divided by 4
+	# multiply by 0x1000 to get the physical address
+
+	page_struct_offset = page_addr - vmemmap_vaddr
+	phys_page_num = long(page_struct_offset / page_struct_size)
+	phys_address = phys_page_num * 0x1000
+	virt_address = phys_address + kvbase
+
+	if DEBUG:
+		print("page_addr = 0x{:016x}".format(page_addr))
+		print("vmemmap_vaddr = 0x{:016x}".format(vmemmap_vaddr))
+		print("page_struct_offset = 0x{:016x}".format(page_struct_offset))
+		print("phys_page_num = 0x{:016x}".format(phys_page_num))
+		print("phys_address = 0x{:016x}".format(phys_address))
+		print("virt_address = 0x{:016x}".format(virt_address))
+	return virt_address
+
 
 def pp_time_ns(ns):
 	ret = ""
@@ -367,11 +485,11 @@ def readlink_kernfs(dentry):
 			forward = "/" + kn.name + forward
 			kn = kn.parent
 #	print("backward: {}, forward: {}".format(backward, forward))
-		return backward + forward[1:]
+		return [ backward + forward[1:] ]
 	except Exception as e:
 		print("error in kernfs_getlink: {}".format(e))
 		pass
-	return "unknown"
+	return [ "unknown" ]
 
 def hlist_entry(addr, stype, member):
 	si = SUInfo(stype)
@@ -440,10 +558,11 @@ def proc_pid(inode):
 def get_proc_task(inode):
 	try:
 		if DEBUG >= 2: print("in get_proc_task(inode: 0x{:016x})".format(inode))
-		return get_pid_task(proc_pid(inode), _PIDTYPE.PIDTYPE_PID)
+		return readSU("struct task_struct", get_pid_task(proc_pid(inode), _PIDTYPE.PIDTYPE_PID))
 	except Exception as e:
 		print("error in get_proc_task: {}".format(e))
 		pass
+	return 0
 def PDE(inode):
 	try:
 		return PROC_I(inode).pde
@@ -470,7 +589,7 @@ def dentry_get_pathname(dentry):
 	return get_pathname(dentry, 0)
 
 def dentry_get_all_paths(dentry, vfsmnt = 0):
-#	print("in dentry_get_all_paths(dentry: 0x{:016x}, vfsmnt: 0x{:016x}".format(dentry, vfsmnt))
+	print("in dentry_get_all_paths(dentry: 0x{:016x}, vfsmnt: 0x{:016x}".format(dentry, vfsmnt))
 	ilvl = 0
 	vfsmnt_list = []
 	all_paths = []
@@ -506,7 +625,7 @@ def dentry_get_all_paths(dentry, vfsmnt = 0):
 			mount_list = []
 
 			sb = dentry.d_sb
-			l = readlistByHead(sb.s_mounts)
+			l = readListByHead(sb.s_mounts)
 
 			if DEBUG >= 1: print(" l has {} entries".format(len(l)))
 			for le in l:
@@ -555,6 +674,7 @@ def path_get_pathname(p):
 	return [ "unknown" ]
 
 
+# should be named readlink_proc_fd
 def readlink_proc_fd(dentry):
 #	print("in readlink_proc_fd(dentry: 0x{:016x})".format(dentry))
 	try:
@@ -571,25 +691,122 @@ def readlink_proc_fd(dentry):
 #		print("struct files_struct: 0x{:016x}".format(files))
 #		print("files.fdt: 0x{:016x}".format(files.fdt))
 #		print("files.fdt.fd: 0x{:016x}".format(files.fdt.fd))
-		f = files.fdt.fd[fd]
-		f = readSU("struct file", f)
+#		f = files.fdt.fd[fd]
+#		f = readSU("struct file", f)
+		f = readSU("struct file", files.fdt.fd[fd])
+		if f:
+			return path_get_pathname(f.f_path)
+		else:
+#			print("fd {} - file 0x{:016x} does not appear to have a target dentry".format(fd, f))
+			return "<stale>"
+
 		target_dentry = file_dentry(f)
 #		print("here 15; target_dentry: 0x{:016x}".format(target_dentry))
 		if target_dentry:
 #			return dentry_get_pathname(target_dentry)
 			return dentry_get_all_paths(target_dentry)
+		print("fd {} - file 0x{:016x} does not appear to have a target dentry".format(fd, f))
 	except Exception as e:
 		exc_info = sys.exc_info()
 		print("error getting path in in {}: {}\n{}".format(inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
 		traceback.print_tb(sys.exc_info()[2])
 		pass
-	return [ "unknown" ]
+#	return [ "unknown" ]
+	return "unknown"
+
+
+def proc_fd_link(dentry):
+	return readlink_proc_fd(dentry)
 
 # inode->i_op => proc_pid_link_inode_operations
 # proc_inode.pid,fd  
 # proc_inode.op.proc_get_link = proc_fd_link
 # dentry -> tid_fd_dentry_operations
 # proc_
+
+def d_inode(dentry):
+	try:
+		return dentry.d_inode
+	except Exception as e:
+		exc_info = sys.exc_info()
+		print("d_inode(0x{:016x} failed in {}: {}\n{}".format(dentry, inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
+		traceback.print_tb(sys.exc_info()[2])
+		pass
+	return 0
+
+def get_fs_root(fs):
+	try:
+		return readSU("struct path", fs.root)
+	except Exception as e:
+		exc_info = sys.exc_info()
+		print("failed to get fs_struct->root in {}: {}\n{}".format(inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
+		traceback.print_tb(sys.exc_info()[2])
+		pass
+	return 0
+def get_fs_pwd(fs):
+	try:
+		return readSU("struct path", fs.pwd)
+	except Exception as e:
+		exc_info = sys.exc_info()
+		print("failed to get fs_struct->pwd in {}: {}\n{}".format(inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
+		traceback.print_tb(sys.exc_info()[2])
+		pass
+	return 0
+
+def get_task_root(task):
+	try:
+		if task.fs:
+			return readSU("struct path", get_fs_root(task.fs))
+	except:
+		pass
+	return 0
+
+def get_mm_exe_file(mm):
+	return mm.exe_file
+
+def get_task_exe_file(task):
+#	print("get_task_exe_file: 0x{:016x}".format(task))
+	try:
+		mm = task.mm
+#		print("get_task_exe_file; mm = 0x{:016x}".format(mm))
+		if mm:
+			return get_mm_exe_file(mm)
+	except:
+		pass
+	return 0
+
+def proc_root_link(dentry):
+	try:
+		task = readSU("struct task_struct", get_proc_task(d_inode(dentry)))
+		if task:
+			return get_task_root(task)
+	except:
+		pass
+	return 0
+
+def proc_cwd_link(dentry):
+	try:
+		task = readSU("struct task_struct", get_proc_task(d_inode(dentry)))
+		if task and task.fs:
+			return get_fs_pwd(task.fs)
+	except:
+		pass
+	return 0
+
+def proc_exe_link(dentry):
+	try:
+		task = readSU("struct task_struct", get_proc_task(d_inode(dentry)))
+		if task:
+			if task.flags & PROCESS_FLAGS['PF_KTHREAD']:
+				return "[{}]".format(task.comm)
+
+			exe_file = get_task_exe_file(task)
+			if exe_file:
+				return path_get_pathname(exe_file.f_path)
+	except:
+		pass
+	return 0
+
 
 def readlink_proc(dentry):
 #	print("in readlink_proc(dentry: 0x{:016x}".format(dentry))
@@ -602,6 +819,44 @@ def readlink_proc(dentry):
 		return [ "unknown" ]
 #	sys.exit()
 #	return dentry_get_pathname(dentry)
+
+	try:
+		inode = dentry.d_inode
+		pi = PROC_I(inode)
+	except Exception as e:
+		print("error in readlink_proc: {}".format(e))
+		sys.exit()
+#		return [ "unknown" ]
+
+	try:
+		pi_op = pi.op
+		get_link_op_addr = pi_op.proc_get_link
+
+		get_link_op_name = addr2sym(get_link_op_addr)
+#		print("get_link_op_name is {}".format(get_link_op_name))
+		if get_link_op_name == "proc_root_link":
+#			print("calling proc_root_link")
+			path = proc_root_link(dentry)
+			return [ get_pathname(path.dentry, path.mnt) ]
+		if get_link_op_name == "proc_cwd_link":
+			path = proc_cwd_link(dentry)
+			return [ get_pathname(path.dentry, path.mnt) ]
+		if get_link_op_name == "proc_fd_link":
+			return [ proc_fd_link(dentry) ]
+#			path = proc_fd_link(dentry)
+#			return [ get_pathname(path.dentry, path.mnt) ]
+		if get_link_op_name == "proc_exe_link":
+			return [ proc_exe_link(dentry) ]
+
+		print("proc_op for get_link is {}".format(get_link_op_name))
+
+	except Exception as e:
+		exc_info = sys.exc_info()
+		print("could not read proc_inode.op.proc_get_linkin {}: {}\n{}".format(inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
+		traceback.print_tb(sys.exc_info()[2])
+		pass
+
+
 
 	try:
 		inode = dentry.d_inode
@@ -631,11 +886,81 @@ def readlink_proc(dentry):
 		print("error in readlink_proc(): {}".format(e))
 		pass
 	return [ "unknown" ]
+
+def mapping_get_page(mapping, offset):
+#	print("in mapping_get_page()")
+	needed_index = offset >> 12 # PAGE_SHIFT
+
+	mapping = readSU("struct address_space", mapping)
+
+	nrpages = mapping.nrpages
+	if nrpages == 0:
+		return 0
+
+	try:
+		for l in exec_crash_command("tree -t ra 0x{:016x}".format(mapping.page_tree)).split("\n"):
+			if l != '':
+				try:
+					page = readSU("struct page", get_arg_value(l))
+					if page.index == needed_index:
+						return page
+				except:
+					pass
+	except:
+		pass
+
+	try:
+		for l in exec_crash_command("tree -t xa 0x{:016x}".format(mapping.i_pages)).split("\n"):
+			if l != '':
+				try:
+					page = readSU("struct page", get_arg_value(l))
+#					print("read page 0x{:016x} with index {}".format(page, page.index))
+					if page.index == needed_index:
+						return page
+				except:
+					print("could not read page 0x{:016x}".format(page))
+					pass
+	except:
+		pass
+
+	return 0
+
+
+def page_get_link(dentry):
+	try:
+		inode = dentry.d_inode
+		mapping = inode.i_mapping
+	except:
+		exc_info = sys.exc_info()
+		print("error getting inode mapping in {}: {}\n{}".format(inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
+		traceback.print_tb(sys.exc_info()[2])
+		return 0
+
+	try:
+		page = mapping_get_page(mapping, 0)
+		vaddr = page_address(page)
+
+#		print("page 0x{:016x} vaddr: 0x{:016x}".format(page, vaddr))
+		link = SmartString(readmem(vaddr, 4096), vaddr, None)
+#		print("page_get_link found link string: {}".format(link))
+		return [ link ]
+	except Exception as e:
+		exc_info = sys.exc_info()
+		print("error finding link in {}: {}\n{}".format(inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
+		traceback.print_tb(sys.exc_info()[2])
+
+		pass
+	return [ "unknown" ]
+
+
+def nfs_get_link(dentry):
+	return page_get_link(dentry)
+
 def readlink_simple(dentry):
 	try:
 		inode = dentry.d_inode
 		if inode.i_link:
-			return inode.i_link
+			return [ inode.i_link ]
 	except:
 		pass
 	return [ "unknown" ]
@@ -679,14 +1004,48 @@ def readlink(dentry):
 		print("error in readlink: {}".format(e))
 		pass
 
-	if fstype == "xfs":
-		return readlink_xfs(dentry)
+
 	if fstype == "sysfs":
 		return readlink_kernfs(dentry)
 	if fstype == "proc":
 		return readlink_proc(dentry)
 	if fstype == "tmpfs" or fstype == "devtmpfs":
 		return readlink_tmpfs(dentry)
+	if fstype == "nfs" or fstype == "nfs4":
+#		print("nfs_get_link")
+		return nfs_get_link(dentry)
+
+	# do we have a synthetic filesystem?
+	if dentry.d_op and dentry.d_op.d_dname:
+		d_dname = dentry.d_op.d_dname
+
+		try:
+			d_dname_fuunc = addr2sym(d_dname)
+			if not d_dname_func == None:
+				print("need to call {} to resolve symlink for dentry 0x{:016x}".format(dentry))
+		except:
+			pass
+
+	if inode.i_op:
+		if inode.i_op.readlink:
+			readlink_func_name = addr2sym(inode.i_op.readlink)
+			print("readlink func for dentry 0x{:016x}, inode 0x{:016x} is {}".format(dentry, inode, readlink_func_name))
+		try:
+			if inode.i_op.get_link:
+				get_link_func_name = addr2sym(inode.i_op.get_link)
+#			print("get_link func is {}".format(get_link_func_name))
+
+				if get_link_func_name == "simple_get_link":
+					return [ inode.i_link ]
+		except:
+			# unable to do ->get_link
+			pass
+#		if readlink_func == "proc_pid_readlink":
+#			return readlink_proc(dentry)
+
+
+	if fstype == "xfs":
+		return [ readlink_xfs(dentry) ]
 
 	return [ "unknown" ]
 
@@ -711,8 +1070,8 @@ def output_stat_info(path, dentry, inode):
 		if not show_stale: return
 		print("{:11s}  dentry: 0x{:016x}, {} (stale)".format(
 			"???????????", dentry, path))
-		print("zero inode.  dentry: {}".format(dentry))
-		print("path:  {}".format(path))
+#		print("zero inode.  dentry: {}".format(dentry))
+#		print("path:  {}".format(path))
 	else:
 		try:
 			i_mode = inode.i_mode
@@ -772,7 +1131,6 @@ def output_stat_info(path, dentry, inode):
 	except:
 		uid = "?"
 		gid = "?"
-
 	# could also output i_mode in {mode:o} format
 	if verbose:
 		print("{}uid: {}, gid: {}, links: {}".format(indent(2), uid, gid, inode.i_nlink))
@@ -850,17 +1208,25 @@ def find_recurse(path="/", addr=0, depth=1):
 	dentry = readSU("struct dentry", addr)
 
 #	print("in find_recurse")
-#	subdirs_offset = container_of(0, "struct dentry", "d_u")
+	subdirs_offset = container_of(0, "struct dentry", "d_u")
 #	subdirs_offset = container_of(0, "struct dentry", "d_subdirs")
-	subdirs_offset = container_of(0, "struct dentry", "d_child")
+#	subdirs_offset = container_of(0, "struct dentry", "d_child")
+#	subdirs_offset = 0
+
+#	print("d_child offset: {}".format(container_of(0, "struct dentry", "d_child")))
+#	print("subdirs_offset: {}".format(container_of(0, "struct dentry", "d_subdirs")))
 
 	try:
 		d_subdirs_head = int(dentry.d_subdirs)
 		if d_subdirs_head == 0:
 			return
-	except:
+	except Exception as e:
+		exc_info = sys.exc_info()
+		print("error reading subdirs head in {}: {}\n{}".format(inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
+		traceback.print_tb(sys.exc_info()[2])
 		sys.exit()
 
+#	print("subdirs head: 0x{:016x}".format(d_subdirs_head))
 	next = d_subdirs_head
 	while 42:
 		try:
