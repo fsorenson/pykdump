@@ -1,7 +1,5 @@
 #!/usr/bin/python
 
-from __future__ import print_function
-
 import re
 from pykdump.API import *
 import argparse
@@ -53,7 +51,12 @@ def addr_func(addr):
 	l = exec_crash_command("sym 0x{:016x}".format(addr)).split("\n")
 	fn_str = l[0].split(" ")[2]
 
-	m = re.match("^([a-zA-Z_][0-9a-zA-Z_]*)(|\+((0x)?[0-9a-zA-Z]+))$", fn_str)
+	print("called addr_func for '{}' - fn_str is '{}'".format(addr, fn_str))
+
+	m = re.match("^([a-zA-Z_][0-9a-zA-Z_]*)(\.[^ ]+)?(|\+((0x)?[0-9a-zA-Z]+))$", fn_str)
+#	__fscache_disable_cookie.cold.26+0x2a
+#	... .constprop
+
 	if m:
 #		print("match: {}".format(m.group(0)))
 #		print("\tfunc name: {}".format(m.group(1)))
@@ -90,7 +93,15 @@ def func_addr(func):
 
 
 def func_string(fname):
-	vi = whatis(fname)
+	print("trying to get function for address {}".format(fname))
+
+	try:
+		vi = whatis(fname)
+#		print("vi is {}".format(vi))
+#		return sys.exit()
+	except Exception as e:
+		print("unable to call whatis(\"{}\") - {}".format(fname, e))
+		return "ERROR"
 	out = []
 	for ati in vi.ti.prototype:
 		astype, apref, asuff = ati.fullname()
