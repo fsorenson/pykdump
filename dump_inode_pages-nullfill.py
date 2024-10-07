@@ -79,6 +79,25 @@ def page_address_slow(page_addr):
 			return int(l.split()[0], 16)
 	return 0
 
+
+def has_member(s, mbr):
+	return (member_size("struct " + s, mbr) != -1)
+
+def get_tree_addrs(th, tt):
+	pages = []
+	for l in exec_crash_command("tree -t {} 0x{:016x}".format(tt, th)).splitlines():
+		if l != '':
+			addr = get_arg_value(l)
+			pages.append(addr)
+
+	return pages
+
+def aspace_pages_list_page_tree(aspace):
+	return get_tree_addrs("ra", aspace.page_tree)
+
+def aspace_pages_list_xarray(aspace):
+	return get_tree_addrs("xa", aspace.i_pages)
+
 def aspace_pages_list(aspace):
 	aspace = readSU("struct address_space", aspace)
 	pages = []
@@ -87,24 +106,19 @@ def aspace_pages_list(aspace):
 	if nrpages == 0:
 		return pages
 
-	if 0 and nrpages == 1: # disabled for now...  some kernels use a tree, even if it's just one page... not sure how to know when it's one or the other
-		# if there's just one page, it's a direct pointer to the page, rather than a tree
-		if DEBUG:
-			print("one page...  appending 0x{:016x}".format(aspace.page_tree.rnode))
-		pages.append(aspace.page_tree.rnode)
-		return pages
-	for l in exec_crash_command("tree -t ra 0x{:016x}".format(aspace.page_tree)).split("\n"):
-		if l != '':
-			addr = get_arg_value(l)
-			if DEBUG:
-				print("page: '{}' => 0x{:016x}".format(l, addr))
-			pages.append(addr)
+	if has_member("address_space", "page_tree"):
+		return get_tree_addrs(aspace.page_tree, "ra")
+
+	if has_member("address_space", "i_pages"):
+		return get_tree_addrs(aspace.i_pages, "xa")
+
 	return pages
+
 
 def dump_inode_pages_nullfill(inode):
 	inode = readSU("struct inode", inode)
 	aspace = inode.i_mapping
-	page_tree = aspace.page_tree
+#	page_tree = aspace.page_tree
 	pages_required = int((inode.i_size + PAGE_SIZE - 1) / PAGE_SIZE)
 
 	DEBUG = 1
@@ -113,7 +127,7 @@ def dump_inode_pages_nullfill(inode):
 		print("inode is 0x{:016x}".format(inode))
 		print("inode size is {}".format(inode.i_size))
 		print("address_space is at 0x{:016x}".format(aspace))
-		print("page_tree is at 0x{:016x}".format(page_tree))
+#		print("page_tree is at 0x{:016x}".format(page_tree))
 		print("address_space has {} pages".format(aspace.nrpages))
 		print("a full page tree would contain {} pages".format(pages_required))
 
