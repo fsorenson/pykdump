@@ -36,6 +36,7 @@ def htonll(x):
 
 BBSHIFT = 9
 BBSIZE = (1 << BBSHIFT)
+BBMASK = (BBSIZE - 1)
 XFS_SB_MAGIC =			0x58465342     # /* 'XFSB' */
 XFS_SB_VERSION_1 =		1              # /* 5.3, 6.0.1, 6.1 */
 XFS_SB_VERSION_2 =		2              # /* 6.2 - attributes */
@@ -339,7 +340,8 @@ def XFS_HDR_BLOCK(mp, d):
 #define xfs_daddr_to_agno(mp,d) \
 #	((xfs_agnumber_t)(XFS_BB_TO_FSBT(mp, d) / (mp)->m_sb.sb_agblocks))
 def xfs_daddr_to_agno(mp, d):
-	return cast__xfs_agnumber_t(XFS_BB_TO_FSBT(mp, d) / mp.m_sb.sb_agblocks)
+#	return cast__xfs_agnumber_t(XFS_BB_TO_FSBT(mp, d) / mp.m_sb.sb_agblocks)
+	return cast__xfs_agnumber_t(int(XFS_BB_TO_FSBT(mp, d) / mp.m_sb.sb_agblocks))
 #define xfs_daddr_to_agbno(mp,d) \
 #	((xfs_agblock_t)(XFS_BB_TO_FSBT(mp, d) % (mp)->m_sb.sb_agblocks))
 def xfs_daddr_to_agbno(mp, d):
@@ -746,6 +748,8 @@ def xfs_whatever_id(addr):
 		return "xfs_buf"
 	if xfs_whatever_is_xfs_inode(addr):
 		return "xfs_inode"
+	if xfs_whatever_is_xfs_trans(addr):
+		return "xfs_trans"
 	if xfs_whatever_is_inode(addr):
 		return "inode"
 	if xfs_whatever_is_bmap(addr):
@@ -881,10 +885,12 @@ def do_convert_from(mp, from_type, val):
 		return val
 	elif from_type in daddr_strings:
 # BBOFF
-		bytes = (daddr_to_bytes(mp, val) & BBMASK)
+		ret = (daddr_to_bytes(mp, val) & BBMASK)
+		print("from daddr {} - bytes: {}".format(val, ret))
+		return (daddr_to_bytes(mp, val) & BBMASK)
 	elif from_type in fsblock_strings:
 # M(BBOFF)|M(BLKOFF)|M(INOIDX
-		bytes = fsblock_to_bytes(mp, val)
+		return fsblock_to_bytes(mp, val)
 	elif from_type in ino_strings:
 # INOOFF
 		return ino_to_bytes(mp, val)
@@ -905,7 +911,8 @@ def do_convert_from(mp, from_type, val):
 	else:
 		print("Error: unable to process 'from' type '{}'".format(from_type))
 		return None
-	print("unable to convert to type '{}'".format(to_type))
+#	print("unable to convert to type '{}'".format(to_type))
+	print("unable to convert from type '{}'".format(from_type))
 	return None
 
 def do_convert_to(mp, bytes, to_type):
@@ -1098,10 +1105,21 @@ def convert_cmd(args):
 	print("target_type: {}".format(target_type))
 
 	bytes = 0
-	for i in range(0, (len(args) - 1) / 2):
-		ret = do_convert_from(mp, args[i*2], get_arg_value(args[i*2 + 1]))
-		if ret != None:
+#	for i in range(0, (len(args) - 1) / 2):
+	i = 0
+	while i < len(args) - 1:
+		from_type = args[i]
+		to_type = args[-1]
+		addr = args[i + 1]
+#	for i in range(0, (len(args) - 1) / 2):
+#		ret = do_convert_from(mp, args[i*2], get_arg_value(args[i*2 + 1]))
+#		print("want to convert addr '{}' from '{}' to '{}'".format(args[i+1], args[i], args[-1]))
+		print("want to convert addr '{}' from '{}' to '{}'".format(addr, from_type, to_type))
+#		ret = do_convert_from(mp, args[i], get_arg_value(args[i + 1]))
+		ret = do_convert_from(mp, from_type, get_arg_value(addr))
+		if not ret is None:
 			bytes += ret
+		i += 2
 
 	print("result of from_types: {}".format(bytes))
 
@@ -1127,7 +1145,14 @@ def convert_cmd(args):
 
 def show_struct_member_simple(struct, member_name, ilvl=0):
 	try:
-		print("{}.{}: {}".format(indent_str(ilvl), member_name, struct.eval(member_name)))
+		print("{}.{}: {}".format(indent_str(ilvl), member_name, struct.Eval(member_name)))
+	except:
+		pass
+
+def show_struct_member_simple_nonzero(struct, member_name, ilvl=0):
+	try:
+		if struct.Eval(member_name):
+			print("{}.{}: {}".format(indent_str(ilvl), member_name, struct.Eval(member_name)))
 	except:
 		pass
 
@@ -1151,7 +1176,8 @@ def show_xlog_ticket(addr, ilvl=0):
 	if not check_prune("xlog_ticket", addr):
 		try:
 			tic = readSU("struct xlog_ticket", addr);
-			print("{}TODO".format(indent_str(ilvl)))
+			print_struct_ptr(addr, "xlog_ticket", ilvl=ilvl, todo=True)
+#			print("{}TODO".format(indent_str(ilvl)))
 		except:
 			pass
 
@@ -1433,8 +1459,40 @@ def show_xfs_info(addr, ilvl=0):
 		sbp.sb_rextsize, sbp.sb_rblocks, sbp.sb_rextents))
 
 
+# either print overall xfsstats (percpu)
+# or per-xfs_mount xfsstats (also percpu)
+def show_xfsstats(addr, ilvl=0):
+	percpu = get_per_cpu()
+
+	# pattern after nfs stat display
+#	for c in percpu.cpu.keys():
+#		stats = percpu.per_cpu_struct(c, addr, "
+
+# 
+#	percpu = get_per_cpu()
+#
+#        totals_events = {}
+#        total_events_stats = get_enum_tag_value("__NFSIOS_COUNTSMAX", "nfs_stat_eventcounters")
+#        totals_bytes = {}
+#        total_bytes_stats = get_enum_tag_value("__NFSIOS_BYTESMAX", "nfs_stat_bytecounters")
+#        totals_fscache = {}
+#        total_fscache_stats = get_enum_tag_value("__NFSIOS_FSCACHEMAX", "nfs_stat_fscachecounters")
+
+#        first_cpu = 1
+#        for c in percpu.cpu.keys():
+#       for c in xrange(0, percpu.count):
+#                io_stats = percpu.per_cpu_struct(c, nfss.io_stats, "nfs_iostats")
+
+
+
+
+
 def show_xfs_mount(addr, ilvl=0):
+	mp = readSU("struct xfs_mount", addr)
 	show_xfs_info(addr, ilvl=ilvl+1)
+
+	xfsstats = mp.m_stats.xs_stats
+	show_xfsstats(xfsstats, ilvl=ilvl+1)
 
 def show_xfs_sb(addr, ilvl=0):
 	print("{}(struct xfs_sb *)0x{:016x}".format(indent_str(ilvl), addr))
@@ -1470,13 +1528,74 @@ def show_super_block(addr, ilvl=0):
 			pass
 
 def show_xfs_trans(addr, ilvl=0):
-	print_struct_ptr(addr, "xfs_trans", ilvl=ilvl, todo=True)
+#	print_struct_ptr(addr, "xfs_trans", ilvl=ilvl, todo=True)
 #	print("{}(struct xfs_trans *)0x{:016x}".format(indent_str(ilvl), addr));
 
 	if not check_prune("xfs_trans", addr):
 		try:
 			tp = readSU("struct xfs_trans", addr)
 			print_struct_ptr(addr, "xfs_trans", ilvl=ilvl, todo=True)
+
+			show_struct_member_simple(tp, "t_log_res", ilvl)
+			show_struct_member_simple(tp, "t_log_count", ilvl)
+			show_struct_member_simple(tp, "t_blk_res", ilvl)
+			show_struct_member_simple(tp, "t_blk_res_used", ilvl)
+			show_struct_member_simple(tp, "t_rtx_res", ilvl)
+			show_struct_member_simple(tp, "t_rtx_res_used", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_icount_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_ifree_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_fdblocks_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_res_fdblocks_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_frextents_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_res_frextents_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_frextents_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_res_frextents_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_dblocks_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_agcount_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_imaxpct_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_rextsize_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_rbmblocks_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_rblocks_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_rextents_delta", ilvl)
+			show_struct_member_simple_nonzero(tp, "t_rextslog_delta", ilvl)
+
+			try:
+				l = readListFromHead(tp.t_items, maxel=1000000)
+				print("{}entries in t_items: {}".format(indent_str(ilvl), len(l)))
+			except:
+				pass
+			try:
+				l = readListFromHead(tp.t_busy, maxel=10000000)
+				print("{}entries in t_busy: {}".format(indent_str(ilvl), len(l)))
+			except:
+				pass
+			# t_pflags
+			# t_flags
+
+			show_xfs_mount(tp.t_mountp, ilvl=ilvl+1)
+		except:
+			pass
+
+def show_block_device(addr, ilvl=0):
+	if not check_prune("block_device", addr):
+		try:
+			bdev = readSU("struct block_device", addr)
+			print_struct_ptr(bdev, "block_device", ilvl=ilvl, todo=True)
+		except:
+			pass
+
+
+def show_xfs_buftarg(addr, ilvl=0):
+#	print_struct_ptr(addr, "xfs_buftarg", ilvl=ilvl, todo=True)
+
+	if not check_prune("xfs_buftarg", addr):
+		try:
+			targ = readSU("struct xfs_buftarg", addr)
+			print_struct_ptr(addr, "xfs_buftarg", ilvl=ilvl, todo=True)
+
+			bdev = targ.bt_bdev
+			show_block_device(bdev, ilvl=ilvl+1)
+
 		except:
 			pass
 
@@ -1487,6 +1606,13 @@ def show_xfs_buf(addr, ilvl=0):
 
 		try:
 			xbf = readSU("struct xfs_buf", addr)
+
+			print("{}.b_addr = (struct page *)0x{:016x}".format(indent_str(ilvl), xbf.b_addr))
+			print("{}.b_offset = {}".format(indent_str(ilvl), xbf.b_offset))
+			print("{}.b_page_count = {}".format(indent_str(ilvl), xbf.b_page_count))
+			print("{}.b_pages = (struct page **)0x{:016x}".format(indent_str(ilvl), xbf.b_pages))
+
+			show_xfs_buftarg(xbf.b_target, ilvl=ilvl+1)
 
 #			any xfs_buf - specific items to show?
 			show_xfs_trans(xbf.b_transp, ilvl=ilvl+1)
@@ -1534,8 +1660,12 @@ def show_xfs_btblock(addr, ilvl=0):
 	print("")
 
 
-def show_xfs_whatever(addr, ilvl=0):
-	id = xfs_whatever_id(addr)
+def show_xfs_whatever(addr, struct_type='', ilvl=0):
+	if not struct_type == '':
+		id = struct_type
+	else:
+		id = xfs_whatever_id(addr)
+
 
 	print("0x{:016x} appears to be '{}'".format(addr, id))
 
@@ -1553,6 +1683,12 @@ def show_xfs_whatever(addr, ilvl=0):
 		return
 	if id == "xfs_inode":
 		show_xfs_mount(xfs_mount_from_whatever(id, addr), ilvl=ilvl+1)
+		return
+	if id == "xfs_trans":
+		show_xfs_trans(addr, ilvl=ilvl+1)
+		return
+	if id == "xlog_ticket":
+		show_xlog_ticket(addr, ilvl=ilvl+1)
 		return
 	if id == "inode":
 		show_xfs_mount(xfs_mount_from_inode(addr), ilvl=ilvl+1)
@@ -1575,15 +1711,24 @@ if __name__ == "__main__":
 	global prune_list
 	prune_list = {}
 
+	import argparse
+	opts_parser = argparse.ArgumentParser()
+	opts_parser.add_argument('--type', '-t', dest='struct_type', default='', action='store')
+	cmd_opts, args = opts_parser.parse_known_args(sys.argv[1:])
 
-	if len(sys.argv) > 1:
-		if sys.argv[1] == "convert":
-			convert_cmd(sys.argv[2:])
+	print("type: {}".format(cmd_opts.struct_type))
+	print("remaining args: {}".format(*args))
+
+
+#	if len(sys.argv) > 1:
+	if len(args) > 0:
+		if args[0] == "convert":
+			convert_cmd(args[2:])
 		else:
-			for arg in sys.argv[1:]:
+			for arg in args:
 				addr = get_arg_value(arg)
 				if addr != 0:
-					show_xfs_whatever(addr)
+					show_xfs_whatever(addr, struct_type=cmd_opts.struct_type)
 	else:
 		super_blocks = readSymbol("super_blocks")
 		sb_list = readSUListFromHead(super_blocks, "s_list", "struct super_block")
