@@ -15,9 +15,6 @@ maxLen      = 0
 _MAXDEPTH_  = 15
 
 
-#def task_state_string(entry):
-#
-
 def get_time_ms_pretty_old(t):
 	ns = int((t % 1000) * 1000000)
 	s = int(t / 1000)
@@ -31,8 +28,6 @@ def get_time_ms_pretty_old(t):
 
 def get_time_ms_pretty(t):
 	return pp_time_ms(t)
-
-
 
 def task_get_last_arrival_pretty(pid):
 	tt = TaskTable()
@@ -122,15 +117,16 @@ def task_last_run(task_addr):
 	return timestamp
 
 class superBlock:
-    def __init__(self, inputAddr, inputName, args = None):
+    def __init__(self, addr, inputName, args = None):
         super_block = None
         if args:
             if args.debug and args.debug > 2:
-                print("{}inputAddr: {}".format(DEBUG, str(inputAddr)))
+#                print("{}inputAddr: {}".format(DEBUG, str(inputAddr)))
+                print("{}addr: {}".format(DEBUG, str(addr)))
                 print("{}inputName: {}".format(DEBUG, inputName))
 
         self.inputName   = inputName
-        super_block      = readSU("struct super_block", long(inputAddr, 16))
+        super_block      = readSU("struct super_block", addr)
         self.super_block = super_block
         self.addr        = Addr(super_block)
         self.sb_type     = str(super_block.s_type.name)
@@ -189,28 +185,36 @@ def get_path(dentry, superBlock = None):
 
 #if args.list_dirty:
 if 1:
-    jiffies       = int(exec_crash_command("p jiffies").split()[-1], 16)
+    jiffies = readSymbol("jiffies")
     Supers        = []
-#    if not args.FS:
-#        filesystems   = ["ext2", "ext3", "ext4", "xfs", "gfs2"]
-#    else:
-#        filesystems   = [args.FS]
 
-    x = exec_crash_command("mount").strip().split("\n")
-    for line in x:
-        if "SUPER" not in line:
-#            if line.split()[2] in filesystems:
-                if args.debug and args.debug > 2:
-                    print("Including - [{}] - {}".format(line.split()[2], line))
-                tempSuperBlock = superBlock("0x" + line.split()[1], line.split()[-1], args)
-                tempSuperBlock.vfsmount = "0x" + line.split()[0]
-                tempSuperBlock.mount_source = line.split()[-2]
-                tempSuperBlock.mount_target = line.split()[-1]
+    super_blocks = readSymbol("super_blocks")
+    sb_list = readSUListFromHead(super_blocks, "s_list", "struct super_block")
 
-                Supers.append(tempSuperBlock)
+    for sb in sb_list:
+        if sb.s_op.freeze_fs: # freezable
+            mount_list = []
 
-                superBlocks[tempSuperBlock.super_block] = tempSuperBlock.inputName
+            raw_list = readListByHead(sb.s_mounts)
+            for le in raw_list:
+                m = readSU("struct mount", container_of(le, "struct mount", "mnt_instance"))
+                mount_list.append(m)
+            for mount in mount_list:
+#                mnt_src = mount.mnt.mnt_devname
+                mnt_src = mount.mnt_devname
+#                pathname = get_pathname(dentry, mount.mnt)
+#                pathname = get_pathname(mount.mnt_mountpoint, mnt_src)
+                pathname = get_pathname(mount.mnt_mountpoint, mount.mnt)
+                print(" - (struct mount *)0x{:016x} - (struct vfsmount *)0x{:016x} - flags: 0x{:04x} - {}".format(
+                    mount, mount.mnt, mount.mnt.mnt_flags, pathname))
 
+                temp_sb = superBlock(sb, pathname)
+                temp_sb.vfsmount = mount.mnt
+                temp_sb.mount_source = mnt_src # devname
+                temp_sb.mount_target = pathname
+                Supers.append(temp_sb)
+
+                superBlocks[temp_sb.super_block] = temp_sb.inputName
 
     if args.debug and args.debug > 2:
         print("")
@@ -252,5 +256,3 @@ if 1:
             if not args.quiet:
                 print("not frozen: {} super_block: {:016x} - super_block.s_frozen = {} - on device {} ({}) mounted at {}".format(
                     superBlock.sb_type, superBlock.addr, str(superBlock.frozen), superBlock.mount_source, superBlock.s_id, superBlock.mount_target))
-
-
