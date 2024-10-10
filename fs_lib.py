@@ -6,7 +6,6 @@ import string
 import sys
 from pykdump.API import *
 from LinuxDump.Tasks import TaskTable
-from obj_info import info
 from LinuxDump.fs.dcache import *
 from functools import wraps, partial
 
