@@ -727,8 +727,8 @@ def list_entry(tmp_addr, struct, member):
 
 ##### probably need these to be at the bottom, after everything is defined
 #import *
-from misc import *
-from fs import *
-from net import *
+#from misc import *
+#from fs import *
+#from net import *
 
 # vim: sw=4 ts=4 noexpandtab
