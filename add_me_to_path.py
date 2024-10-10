@@ -15,7 +15,7 @@ if __name__ == "__main__":
 	if len(args):
 		for newpath in args:
 			try_addpath(newpath)
-    else:
+	else:
 		try_addpath(os.path.dirname(os.path.realpath(sys.argv[0])))
 
 # vim: sw=4 ts=4 noexpandtab
