@@ -214,6 +214,12 @@ RWSEM_READER_OWNED = (1 << 0)
 RWSEM_ANONYMOUSLY_OWNED = (1 << 1)
 #define RWSEM_READER_OWNED      (1UL << 0)
 #define RWSEM_ANONYMOUSLY_OWNED (1UL << 1)
+
+# explanation from longman:
+# write lock: 0xffffffff00000001
+# if the wait list isn't empty, 0xffffffff00000000 will be added
+#  to the counter, resulting in 0xfffffffe00000001
+
 def rwsem_owner(rwsem):
 	rwsem = readSU("struct rw_semaphore", rwsem)
 
