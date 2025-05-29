@@ -1149,7 +1149,7 @@ def readlink(dentry):
 
 	return [ "unknown" ]
 
-def qstr(addr):
+def qstr(addr, complain=False):
 	try:
 		q = readSU("struct qstr", long(addr))
 		len = q.len
@@ -1157,7 +1157,8 @@ def qstr(addr):
 			return readmem(q.name, q.len)
 		return ""
 	except:
-		print("hmm. some exception reding string")
+		if complain:
+			print("hmm. some exception reading string")
 #		raise
 		pass
 	return ""
@@ -1165,6 +1166,10 @@ def qstr(addr):
 # takes path, dentry, inode
 def output_stat_info(path, dentry, inode):
 	if dentry == 0: return
+	try:
+		foo = readmem(dentry, getSizeOf("dentry"))
+	except:
+		return
 
 	if inode == 0:
 		if not show_stale: return
@@ -1293,21 +1298,21 @@ def check_d_alias(dentry):
 		pass
 
 
-def get_dentry_name(dentry):
+def get_dentry_name(dentry, complain=True):
 	# was the filename embedded?  can we use the name?
 	name_ptr = readPtr(Addr(dentry.d_name, extra='name'))
 
 	if name_ptr == Addr(dentry, extra='d_iname'):
 #	if readPtr(Addr(dentry.d_name, extra='name')) == Addr(dentry, extra='d_iname'):
 
-		path_ele = qstr(dentry.d_name)
+		path_ele = qstr(dentry.d_name, complain)
 		try:
 			return cleanup_str(str(path_ele, 'utf-8'))
 		except:
 			return "????? - cannot read 0x{:016x}".format(dentry.d_name)
 	try:
 #		name = readPtr(Addr(dentry.d_name, extra='name'))
-		path_ele = qstr(dentry.d_name)
+		path_ele = qstr(dentry.d_name, complain)
 		return cleanup_str(str(path_ele, 'utf-8'))
 	except:
 		pass
@@ -1362,7 +1367,7 @@ def find_recurse(path="/", addr=0, depth=1):
 			raise
 			inode = 0
 			pass
-		dentry_name = get_dentry_name(dentry)
+		dentry_name = get_dentry_name(dentry, complain=False)
 		if len(dentry_name) == 0:
 			continue
 
