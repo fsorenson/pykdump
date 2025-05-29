@@ -26,6 +26,10 @@ KERNFS_LINK = enumerator_value("KERNFS_LINK")
 
 
 def rhel_major_version():
+	if not is_rhel():
+		return 0
+	if sys_info.kernel >= "5.14.0" and sys_info.kernel <= "5.14.0":
+		return 9
 	if sys_info.kernel >= "4.18.0" and sys_info.kernel <= "4.18.0":
 		return 8
 	if sys_info.kernel >= "3.10.0" and sys_info.kernel <= "3.10.0":
@@ -35,7 +39,7 @@ def rhel_major_version():
 	if sys_info.kernel >= "2.6.18" and sys_info.kernel <= "2.6.18":
 		return 5
 
-RHEL_VERSION_STRS_el = [ 'el5', 'el6', 'el7', 'el8' ]
+RHEL_VERSION_STRS_el = [ 'el5', 'el6', 'el7', 'el8', 'el9' ]
 def is_rhel():
 	for s in RHEL_VERSION_STRS_el:
 		if s in sys_info.RELEASE:
@@ -78,6 +82,28 @@ DFLAGS_C = '''
 #define DCACHE_SYMLINK_TYPE             0x03000000 /* Symlink */
 #define DCACHE_FILE_TYPE                0x04000000 /* Other file type */
 #define DCACHE_OP_REAL                  0x08000000
+'''
+
+DFLAGS_C_RHEL6 = '''
+#define DCACHE_AUTOFS_PENDING 0x0001    /* autofs: "under construction" */
+#define DCACHE_NFSFS_RENAMED  0x0002
+#define DCACHE_DISCONNECTED 0x0004
+#define DCACHE_REFERENCED       0x0008  /* Recently used, don't discard. */
+#define DCACHE_UNHASHED         0x0010
+
+#define DCACHE_INOTIFY_PARENT_WATCHED 0x0020
+#define DCACHE_COOKIE           0x0040  /* For use by dcookie subsystem */
+
+#define DCACHE_FSNOTIFY_PARENT_WATCHED 0x0080
+     /* Parent inode is watched by some fsnotify listener */
+
+#define DCACHE_MOUNTED          0x10000 /* is a mountpoint */
+#define DCACHE_NEED_AUTOMOUNT   0x20000 /* handle automount on this dir */
+#define DCACHE_MANAGE_TRANSIT   0x40000 /* manage transit from this dirent */
+#define DCACHE_MANAGED_DENTRY \
+        (DCACHE_MOUNTED|DCACHE_NEED_AUTOMOUNT|DCACHE_MANAGE_TRANSIT)
+
+#define DCACHE_SHRINKING        0x80000000 /* dentry is being shrunk */
 '''
 
 DFLAGS_C_RHEL8 = '''
@@ -127,27 +153,56 @@ DFLAGS_C_RHEL8 = '''
 #define DCACHE_NORCU                    0x40000000 /* No RCU delay for freeing */
 '''
 
-DFLAGS_C_RHEL6 = '''
-#define DCACHE_AUTOFS_PENDING 0x0001    /* autofs: "under construction" */
-#define DCACHE_NFSFS_RENAMED  0x0002
-#define DCACHE_DISCONNECTED 0x0004
-#define DCACHE_REFERENCED       0x0008  /* Recently used, don't discard. */
-#define DCACHE_UNHASHED         0x0010
+DFLAGS_C_RHEL9 = '''
+#define DCACHE_OP_HASH                  0x00000001
+#define DCACHE_OP_COMPARE               0x00000002
+#define DCACHE_OP_REVALIDATE            0x00000004
+#define DCACHE_OP_DELETE                0x00000008
+#define DCACHE_OP_PRUNE                 0x00000010
 
-#define DCACHE_INOTIFY_PARENT_WATCHED 0x0020
-#define DCACHE_COOKIE           0x0040  /* For use by dcookie subsystem */
+#define DCACHE_DISCONNECTED             0x00000020
+#define DCACHE_REFERENCED               0x00000040 /* Recently used, don't discard. */
 
-#define DCACHE_FSNOTIFY_PARENT_WATCHED 0x0080
-     /* Parent inode is watched by some fsnotify listener */
+#define DCACHE_DONTCACHE                0x00000080 /* Purge from memory on final dput() */
 
-#define DCACHE_MOUNTED          0x10000 /* is a mountpoint */
-#define DCACHE_NEED_AUTOMOUNT   0x20000 /* handle automount on this dir */
-#define DCACHE_MANAGE_TRANSIT   0x40000 /* manage transit from this dirent */
-#define DCACHE_MANAGED_DENTRY \
-        (DCACHE_MOUNTED|DCACHE_NEED_AUTOMOUNT|DCACHE_MANAGE_TRANSIT)
+#define DCACHE_CANT_MOUNT               0x00000100
+#define DCACHE_GENOCIDE                 0x00000200
+#define DCACHE_SHRINK_LIST              0x00000400
 
-#define DCACHE_SHRINKING        0x80000000 /* dentry is being shrunk */
+#define DCACHE_OP_WEAK_REVALIDATE       0x00000800
+#define DCACHE_NFSFS_RENAMED            0x00001000
+#define DCACHE_FSNOTIFY_PARENT_WATCHED  0x00004000
+
+#define DCACHE_DENTRY_KILLED            0x00008000
+
+#define DCACHE_MOUNTED                  0x00010000 /* is a mountpoint */
+#define DCACHE_NEED_AUTOMOUNT           0x00020000 /* handle automount on this dir */
+#define DCACHE_MANAGE_TRANSIT           0x00040000 /* manage transit from this dirent */
+
+#define DCACHE_LRU_LIST                 0x00080000
+
+#define DCACHE_ENTRY_TYPE               0x00700000
+#define DCACHE_MISS_TYPE                0x00000000 /* Negative dentry (maybe fallthru to nowhere) */
+#define DCACHE_WHITEOUT_TYPE            0x00100000 /* Whiteout dentry (stop pathwalk) */
+#define DCACHE_DIRECTORY_TYPE           0x00200000 /* Normal directory */
+#define DCACHE_AUTODIR_TYPE             0x00300000 /* Lookupless directory (presumed automount) */
+#define DCACHE_REGULAR_TYPE             0x00400000 /* Regular file type (or fallthru to such) */
+#define DCACHE_SPECIAL_TYPE             0x00500000 /* Other file type (or fallthru to such) */
+#define DCACHE_SYMLINK_TYPE             0x00600000 /* Symlink (or fallthru to such) */
+
+#define DCACHE_NOKEY_NAME				0x02000000 /* Encrypted name encoded without key */
+#define DCACHE_OP_REAL					0x04000000
+
+#define DCACHE_PAR_LOOKUP               0x10000000 /* being looked up (with parent locked shared) */
+#define DCACHE_DENTRY_CURSOR            0x20000000
+#define DCACHE_NORCU                    0x40000000 /* No RCU delay for freeing */
 '''
+if is_rhel() and rhel_major_version() == 6:
+	DFLAGS_C = DFLAGS_C_RHEL6
+if is_rhel() and rhel_major_version() == 8:
+	DFLAGS_C = DFLAGS_C_RHEL8
+if is_rhel() and rhel_major_version() == 9:
+	DFLAGS_C = DFLAGS_C_RHEL9
 
 # from include/linux/fs.h inode state bits
 INO_STATE_C = '''
@@ -168,6 +223,13 @@ INO_STATE_C = '''
 #define OVL_INUSE 14
 #define CREATING 15
 '''
+if rhel_major_version() == 9:
+	INO_STATE_C = INO_STATE_C + '''
+#define DONTCACHE	16
+#define SYNC_QUEUED	17
+#define PINNING_FSCACHE_WB 18
+'''
+
 INO_STATE = CDefine(INO_STATE_C)
 
 # from include/linux/fs.h inode flags S_*
@@ -184,13 +246,6 @@ INO_FLAGS_C = '''
 #define S_PRIVATE       512     /* Inode is fs-internal */
 #define S_AUTOMOUNT     2048    /* Automount/referral quasi-directory */
 '''
-
-if is_rhel() and rhel_major_version() == 6:
-	DFLAGS_C = DFLAGS_C_RHEL6
-if is_rhel() and rhel_major_version() == 8:
-	DFLAGS_C = DFLAGS_C_RHEL8
-
-
 # check for rhel 7 kernel, add flags
 if is_rhel() and rhel_major_version() == 7:
 	INO_FLAGS_C = INO_FLAGS_C + '''
@@ -217,12 +272,27 @@ if is_rhel() and rhel_major_version() == 8:
 #define S_DAX           8192   /* Direct Access, avoiding the page cache */
 '''
 
+if rhel_major_version() == 9:
+	INO_FLAGS_C = INO_FLAGS_C + '''
+#define S_NOSEC			4096	/* no suid or xattr security attributes */
+#define S_ENCRYPTED     16384	/* Encrypted file (using fs/crypto/) */
+#define S_CASEFOLD      32768	/* Casefolded file */
+#define S_VERITY        65536	/* Verity file (using fs/verity/) */
+#define S_KERNEL_FILE   131072	/* File is in use by the kernel (eg. fs/cachefiles) */
+'''
+	# if some common dax-related function exists, add S_DAX
+	if symbol_exists('dax_inode'):
+		INO_FLAGS_C = INO_FLAGS_C + '''
+#define S_DAX           8192   /* Direct Access, avoiding the page cache */
+'''
+
 DFLAGS = CDefine(DFLAGS_C)
 INO_FLAGS = CDefine(INO_FLAGS_C)
 
 #print("ino_flags_c: {}".format(INO_FLAGS_C))
 #print("INO_FLAGS: {}".format(INO_FLAGS))
 
+# include/linux/sched.h
 PROCESS_FLAGS_C = '''
 #define PF_IDLE                 0x00000002      /* I am an IDLE thread */
 #define PF_EXITING              0x00000004      /* Getting shut down */
@@ -254,6 +324,36 @@ PROCESS_FLAGS_C = '''
 #define PF_IO_WORKER            0x20000000      /* Task is an IO worker */
 #define PF_MUTEX_TESTER         0x20000000      /* Thread belongs to the rt mutex tester */
 #define PF_FREEZER_SKIP         0x40000000      /* Freezer should not count it as freezable */
+#define PF_SUSPEND_TASK         0x80000000      /* This thread called freeze_processes() and should not be frozen */
+'''
+if rhel_major_version() == 9:
+	PROCESS_FLAGS_C = '''
+#define PF_VCPU                 0x00000001      /* I'm a virtual CPU */
+#define PF_IDLE                 0x00000002      /* I am an IDLE thread */
+#define PF_EXITING              0x00000004      /* Getting shut down */
+#define PF_POSTCOREDUMP         0x00000008      /* Coredumps should ignore this task */
+#define PF_IO_WORKER            0x00000010      /* Task is an IO worker */
+#define PF_WQ_WORKER            0x00000020      /* I'm a workqueue worker */
+#define PF_FORKNOEXEC           0x00000040      /* Forked but didn't exec */
+#define PF_MCE_PROCESS          0x00000080      /* Process policy on mce errors */
+#define PF_SUPERPRIV            0x00000100      /* Used super-user privileges */
+#define PF_DUMPCORE             0x00000200      /* Dumped core */
+#define PF_SIGNALED             0x00000400      /* Killed by a signal */
+#define PF_MEMALLOC             0x00000800      /* Allocating memory */
+#define PF_NPROC_EXCEEDED       0x00001000      /* set_user() noticed that RLIMIT_NPROC was exceeded */
+#define PF_USED_MATH            0x00002000      /* If unset the fpu must be initialized before use */
+#define PF_USED_ASYNC           0x00004000      /* Used async_schedule*(), used by module init */
+#define PF_NOFREEZE             0x00008000      /* This thread should not be frozen */
+#define PF_KSWAPD               0x00020000      /* I am kswapd */
+#define PF_MEMALLOC_NOFS        0x00040000      /* All allocation requests will inherit GFP_NOFS */
+#define PF_MEMALLOC_NOIO        0x00080000      /* All allocation requests will inherit GFP_NOIO */
+#define PF_LOCAL_THROTTLE       0x00100000      /* Throttle writes only against the bdi I write to,
+                                                 * I am cleaning dirty pages from some other bdi. */
+#define PF_KTHREAD              0x00200000      /* I am a kernel thread */
+#define PF_RANDOMIZE            0x00400000      /* Randomize virtual address space */
+#define PF_NO_SETAFFINITY       0x04000000      /* Userland is not allowed to meddle with cpus_mask */
+#define PF_MCE_EARLY            0x08000000      /* Early kill for mce process policy */
+#define PF_MEMALLOC_PIN         0x10000000      /* Allocation context constrained to zones which allow long term pinning. */
 #define PF_SUSPEND_TASK         0x80000000      /* This thread called freeze_processes() and should not be frozen */
 '''
 PROCESS_FLAGS = CDefine(PROCESS_FLAGS_C)
@@ -1073,6 +1173,22 @@ def output_stat_info(path, dentry, inode):
 #		print("zero inode.  dentry: {}".format(dentry))
 #		print("path:  {}".format(path))
 	else:
+		try:
+			d_entry_type = dentry.d_flags & DFLAGS['DCACHE_ENTRY_TYPE']
+		except:
+			return
+
+#		if d_entry_type == DFLAGS['DCACHE_MISS_TYPE']:
+#			# miss
+#define DCACHE_MISS_TYPE                0x00000000 /* Negative dentry (maybe fallthru to nowhere) */
+#define DCACHE_WHITEOUT_TYPE            0x00100000 /* Whiteout dentry (stop pathwalk) */
+#define DCACHE_DIRECTORY_TYPE           0x00200000 /* Normal directory */
+#define DCACHE_AUTODIR_TYPE             0x00300000 /* Lookupless directory (presumed automount) */
+#define DCACHE_REGULAR_TYPE             0x00400000 /* Regular file type (or fallthru to such) */
+#define DCACHE_SPECIAL_TYPE             0x00500000 /* Other file type (or fallthru to such) */
+#define DCACHE_SYMLINK_TYPE             0x00600000 /* Symlink (or fallthru to such) */
+
+
 		try:
 			i_mode = inode.i_mode
 			itype = i_mode & S_IFMT
