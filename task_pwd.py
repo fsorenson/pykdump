@@ -38,18 +38,19 @@ def pid_show_pwd(pid):
     if t == None:
         return
 
-    task_show_pid(t)
+    task_show_pwd(t)
 
 
 if __name__ == "__main__":
-    if sys.argv[0] == "pid_pwd.py":
+    exe_name = os.path.basename(sys.argv[0])
+    if exe_name == "pid_pwd.py":
         if len(sys.argv) > 1:
             for arg in sys.argv[1:]:
                 pid = get_arg_value(arg)
                 pid_show_pwd(pid)
         else:
             print("usage: {} <pid> [<pid> ...]".format(sys.argv[0]))
-    elif sys.argv[0] == "task_pwd.py":
+    elif exe_name == "task_pwd.py":
         if len(sys.argv) > 1:
             for arg in sys.argv[1:]:
                 task = get_arg_value(arg)
