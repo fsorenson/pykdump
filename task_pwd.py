@@ -1,5 +1,9 @@
 #!/usr/bin/env python
 import sys, os
+from LinuxDump import *
+from LinuxDump.Tasks import *
+from LinuxDump.Tasks import TaskTable
+
 
 if __name__ == "__main__":
         mypath = os.path.dirname(os.path.realpath(sys.argv[0]))
@@ -21,25 +25,28 @@ def get_arg_value(arg):
         state = task_state_abbr(t.state)
 
 def task_show_pwd(task):
+
+    task = readSU("struct task_struct", task)
+
     comm = task.comm
     fs = task.fs
     pwd = fs.pwd
 
-    pwd_path = get_pathname(pwd.mnt, pwd.dentry)
+    pwd_path = get_pathname(pwd.dentry, pwd.mnt)
     comm = task.comm
     pid = task.pid
     print("task: 0x{:016x}  pid: {:8d}  comm: {}   pwd: {}".format(
-        task, pid, comm, pwd))
+        Addr(task), pid, comm, pwd_path))
 
 def pid_show_pwd(pid):
     tt = TaskTable()
-    t = tt.getByTid(pid)
+    task = tt.getByTid(pid)
 
-    if t == None:
+    if task == None:
+        print("could not find task for pid {}".format(pid))
         return
 
-    task_show_pwd(t)
-
+    task_show_pwd(task.ts)
 
 if __name__ == "__main__":
     exe_name = os.path.basename(sys.argv[0])
@@ -54,8 +61,10 @@ if __name__ == "__main__":
         if len(sys.argv) > 1:
             for arg in sys.argv[1:]:
                 task = get_arg_value(arg)
-                pid = task.pid
-                pid_show_pwd(pid)
+                try:
+                    task_show_pwd(task)
+                except:
+                    pass
         else:
             print("usage: {} <task> [<task> ...]".format(sys.argv[0]))
 
