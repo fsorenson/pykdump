@@ -1,7 +1,5 @@
 #!/usr/bin/python
 
-from __future__ import print_function
-
 import sys, os
 
 if __name__ == "__main__":
@@ -10,7 +8,7 @@ if __name__ == "__main__":
 		sys.path.append(mypath)
 
 from fs_lib import *
-from file import *
+#from file import *
 from pykdump.API import *
 #from misc.percpu import get_per_cpu
 
