@@ -61,13 +61,16 @@ def inotify_mark_user_mask(fsn_mark):
 
 def inotify_fdinfo(mark):
 	mark = readSU("struct fsnotify_mark", mark)
+	if not mark or not mark.connector:
+		print("invalid inotify mark connector")
+		return
 	if (mark.connector.type != enumerator_value("FSNOTIFY_OBJ_TYPE_INODE")):
-		print("unexpected type")
+		print("unexpected connector type")
 		return
 
 	inode_mark = readSU("struct inotify_inode_mark", container_of(mark, "struct inotify_inode_mark", "fsn_mark"))
 	inode = fsnotify_conn_inode(mark.connector)
-	print("inode: 0x{:016x}".format(inode))
+	print("inode: 0x{:016x}  ".format(inode), end='')
 	if inode:
 		print("inotify wd:{:x} ino:{:x} sdev:{:x} mask:{:x} ignored_mask:0 ".format(
 			inode_mark.wd, inode.i_ino, inode.i_sb.s_dev, inotify_mark_user_mask(mark)), end='')
@@ -75,12 +78,10 @@ def inotify_fdinfo(mark):
 		print("")
 
 
-
-
 def inotify_show_fdinfo(file):
 	group = readSU("struct fsnotify_group", file.private_data)
 	for mark in readSUListFromHead(group.marks_list, "g_list", "struct fsnotify_mark"):
-		print("mark: 0x{:016x}".format(mark))
+		print("mark: 0x{:016x}  ".format(mark), end='')
 		inotify_fdinfo(mark)
 
 
@@ -91,7 +92,7 @@ def display_fdinfo(addr):
 	file = readSU("struct file", addr)
 	fop = file.f_op
 
-#	print("file: 0x{:016x}".format(file))
+	print("file: 0x{:016x}".format(file))
 #	print(" f_op is 0x{:016x}: {}".format(fop, addr2sym(fop)))
 
 	print("pos:    {}".format(file.f_pos))
@@ -102,18 +103,17 @@ def display_fdinfo(addr):
 
 	fops = addr2sym(file.f_op)
 	if fops == "inotify_fops":
-		print("inotify")
+		print("inotify type")
 		inotify_show_fdinfo(file)
 	else:
 		print("unknown type")
 
 
+	print("")
 
 
 
 if __name__ == "__main__":
-	print("executing")
-
 	for addr in sys.argv[1:]:
 		addr = arg_value(addr)
 		display_fdinfo(addr)
