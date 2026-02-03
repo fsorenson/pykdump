@@ -3,6 +3,7 @@
 import sys
 import inspect
 from pykdump.API import *
+from LinuxDump.trees import *
 from crash import get_pathname
 import traceback
 
@@ -169,6 +170,31 @@ def fanotify_show_fdinfo(file):
 	notify_show_fdinfo(file, fanotify_fdinfo)
 
 
+def eventfd_show_fdinfo(file):
+	ctx = readSU("struct eventfd_ctx", file.private_data)
+	print("eventfd-count: {:16x}".format(ctx.count))
+
+def rb_first_cached(root):
+	return root.rb_leftmost
+def rb_entry(ptr, typ, member):
+	return readSU(typ, container_of(ptr, typ, member))
+
+def eventpoll_show_fdinfo(file):
+	ep = readSU("struct eventpoll", file.private_data)
+	rbp = rb_first_cached(ep.rbr)
+	while rbp:
+		epi = rb_entry(rbp, "struct epitem", "rbn")
+		inode = file_inode(epi.ffd.file)
+
+		print("tfd: {:8d} events: {:8x} data: {:16x}  pos: {:11d} ino:{:x} sdev:{:x}".format(
+			epi.ffd.fd, epi.event.events, epi.event.data, epi.ffd.file.f_pos,
+			inode.i_ino, inode.i_sb.s_dev))
+		#define rb_entry(ptr, type, member) container_of(ptr, type, member)
+		rbp = rb_next(rbp)
+		if i < 4:
+			break
+	print("")
+
 
 def real_mount(vfsmnt):
 	return readSU("struct mount", container_of(vfsmnt, "struct mount", "mnt"))
@@ -196,6 +222,12 @@ def display_fdinfo(addr):
 	elif fops == "fanotify_fops":
 		print("fanotify type")
 		fanotify_show_fdinfo(file)
+	elif fops == "eventfd_fops":
+		print("eventfd type")
+		eventfd_show_fdinfo(file)
+	elif fops == "eventpoll_fops":
+		print("eventpoll type")
+		eventpoll_show_fdinfo(file)
 	else:
 		print("unknown type")
 
