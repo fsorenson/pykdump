@@ -274,13 +274,16 @@ def display_fdinfo(addr):
 		eventpoll_show_fdinfo(file)
 	elif fops == "signalfd_fops":
 		signalfd_show_fdinfo(file)
+	elif fops == "timerfd_fops":
+		print("timerfd not implemented")
+	elif fops == "userfaultfd_fops":
+		print("userfaultfd not implemented")
+	elif fops == "io_uring_fops":
+		print("io_uring not implemented")
 	else:
-		print("unknown type")
-
+		print("unknown type: {}, show_fdinfo: {}".format(fops, addr2sym(file.f_op.show_fdinfo)))
 
 	print("")
-
-
 
 if __name__ == "__main__":
 	for addr in sys.argv[1:]:
