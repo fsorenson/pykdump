@@ -191,10 +191,54 @@ def eventpoll_show_fdinfo(file):
 			inode.i_ino, inode.i_sb.s_dev))
 		#define rb_entry(ptr, type, member) container_of(ptr, type, member)
 		rbp = rb_next(rbp)
+
+__BITS_PER_LONG = 64
+_NSIG = 64
+_NSIG_BPW = __BITS_PER_LONG
+_NSIG_WORDS = (_NSIG / _NSIG_BPW)
+def signotset(s):
+	if _NSIG_WORDS >= 4:
+		s.sig[3] = (~(s.sig[3]))
+		s.sig[2] = (~(s.sig[2]))
+	if _NSIG_WORDS >= 2:
+		s.sig[1] = (~(s.sig[1]))
+	s.sig[0] = (~(s.sig[0]))
+	return s
+def sigismember(s, sig):
+	sig -= 1
+	if _NSIG_WORDS == 1:
+		return 1 & (s.sig[0] >> sig)
+	return 1 & (s.sig[sig / _NSIG_BPW] >> (sig % _NSIG_BPW))
+def render_sigset_t(hdr, s):
+	print("{}".format(hdr), end='')
+	i = _NSIG
+	hex_asc = "0123456789abcdef"
+
+	while True:
+		x = 0
+		i -= 4
+		if sigismember(s, i+1):
+			x |= 1
+		if sigismember(s, i+2):
+			x |= 2
+		if sigismember(s, i+3):
+			x |= 4
+		if sigismember(s, i+4):
+			x |= 8
+		print("{:s}".format(hex_asc[x:1]), end='')
+
 		if i < 4:
 			break
 	print("")
 
+def signalfd_show_fdinfo(file):
+	ctx = readSU("struct signalfd_ctx", file.private_data)
+	print("nsig_words: {}".format(_NSIG_WORDS))
+	try:
+		sigmask = signotset(ctx.sigmask)
+	except:
+		print("error in signotset")
+	render_sigset_t("sigmask:\t", sigmask)
 
 def real_mount(vfsmnt):
 	return readSU("struct mount", container_of(vfsmnt, "struct mount", "mnt"))
@@ -228,6 +272,8 @@ def display_fdinfo(addr):
 	elif fops == "eventpoll_fops":
 		print("eventpoll type")
 		eventpoll_show_fdinfo(file)
+	elif fops == "signalfd_fops":
+		signalfd_show_fdinfo(file)
 	else:
 		print("unknown type")
 
