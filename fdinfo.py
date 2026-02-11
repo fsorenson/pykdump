@@ -4,6 +4,7 @@ import sys
 import inspect
 from pykdump.API import *
 from LinuxDump.trees import *
+from LinuxDump.fs.dcache import *
 from crash import get_pathname
 import traceback
 
@@ -243,12 +244,23 @@ def signalfd_show_fdinfo(file):
 def real_mount(vfsmnt):
 	return readSU("struct mount", container_of(vfsmnt, "struct mount", "mnt"))
 
-def display_fdinfo(addr):
+def display_file_fdinfo(addr):
 	file = readSU("struct file", addr)
-	fop = file.f_op
+	fops = addr2sym(file.f_op)
 
-	print("file: 0x{:016x}".format(file))
-#	print(" f_op is 0x{:016x}: {}".format(fop, addr2sym(fop)))
+	i_mode = file.f_path.dentry.d_inode.i_mode
+
+	if S_ISREG(i_mode): file_type = "REG "
+	elif S_ISSOCK(i_mode): file_type = "SOCK"
+	elif S_ISLNK(i_mode): file_type = "LNK "
+	elif S_ISBLK(i_mode): file_type = "BLK "
+	elif S_ISDIR(i_mode): file_type = "DIR "
+	elif S_ISCHR(i_mode): file_type = "CHR "
+	elif S_ISFIFO(i_mode): file_type = "FIFO"
+	else: file_type = "UNK "
+
+	file_path = get_pathname(file.f_path.dentry, file.f_path.mnt)
+	print("file: 0x{:016x} - {} {}".format(file, file_type, file_path))
 
 	print("pos:    {}".format(file.f_pos))
 	print("flags:  0{:o}".format(file.f_flags))
@@ -259,7 +271,6 @@ def display_fdinfo(addr):
 	if file.f_op and not file.f_op.show_fdinfo:
 		return
 
-	fops = addr2sym(file.f_op)
 	if fops == "inotify_fops":
 		print("inotify type")
 		inotify_show_fdinfo(file)
@@ -286,8 +297,26 @@ def display_fdinfo(addr):
 	print("")
 
 if __name__ == "__main__":
-	for addr in sys.argv[1:]:
-		addr = arg_value(addr)
-		display_fdinfo(addr)
+	opts_parser = argparse.ArgumentParser()
+	opts_parser.add_argument('--file', dest = 'files', action = 'store', nargs = '*')
+	opts_parser.add_argument('--pid', '-p', dest = 'pids', action = 'store', nargs = '*')
+	opts_parser.add_argument('--fd', dest = 'fds', action = 'store', nargs = '*')
+
+	opts, remain = opts_parser.parse_known_args(sys.argv[1:])
+
+	if not opts.files and not opts.pids:
+		print("specify a 'file', multiple 'pids', or a single 'pid' with optionally multiple 'fds'")
+	elif (opts.files and len(opts.files)) and ((opts.files and len(opts.pids)) or (opts.fds and len(opts.fds))):
+		print("Can't specify both '--file' and '--pid' or '--fd' options")
+	elif opts.files and len(opts.files):
+		for addr in opts.files:
+			display_file_fdinfo(arg_value(addr))
+	elif (opts.pids and len(opts.pids) > 1) and (opts.fds and len(opts.fds)):
+		print("Can't specify fds for more than one pid")
+	elif opts.pids and len(opts.pids):
+	elif opts.fds and len(opts.fds):
+		print("Must specify a pid in order to show fds")
+	else:
+		print("specify a 'file', multiple 'pids', or a single 'pid' with optionally multiple 'fds'")
 
 # vim: sw=4 ts=4 noexpandtab
