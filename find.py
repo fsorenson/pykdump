@@ -920,10 +920,7 @@ def path_get_pathname(p):
 		pass
 	return [ "unknown" ]
 
-
-# should be named readlink_proc_fd
 def readlink_proc_fd(dentry):
-#	print("in readlink_proc_fd(dentry: 0x{:016x})".format(dentry))
 	try:
 		inode = dentry.d_inode
 		pi = PROC_I(inode)
@@ -931,7 +928,6 @@ def readlink_proc_fd(dentry):
 		fd = pi.fd
 
 		tk = get_proc_task(inode)
-#		print("back in readlink_proc_fd...  task: 0x{:016x}".format(tk))
 		tk = readSU("struct task_struct", tk)
 
 		files = tk.files
@@ -958,7 +954,6 @@ def readlink_proc_fd(dentry):
 		print("error getting path in in {}: {}\n{}".format(inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
 		traceback.print_tb(sys.exc_info()[2])
 		pass
-#	return [ "unknown" ]
 	return "unknown"
 
 
@@ -1012,10 +1007,8 @@ def get_mm_exe_file(mm):
 	return mm.exe_file
 
 def get_task_exe_file(task):
-#	print("get_task_exe_file: 0x{:016x}".format(task))
 	try:
 		mm = task.mm
-#		print("get_task_exe_file; mm = 0x{:016x}".format(mm))
 		if mm:
 			return get_mm_exe_file(mm)
 	except:
@@ -1056,16 +1049,12 @@ def proc_exe_link(dentry):
 
 
 def readlink_proc(dentry):
-#	print("in readlink_proc(dentry: 0x{:016x}".format(dentry))
-
 	try:
 		inode = dentry.d_inode
 	except Exception as e:
 		print("exception in readlink_proc: {}".format(e))
 
-		return [ "unknown" ]
-#	sys.exit()
-#	return dentry_get_pathname(dentry)
+		return "unknown"
 
 	try:
 		inode = dentry.d_inode
@@ -1073,27 +1062,22 @@ def readlink_proc(dentry):
 	except Exception as e:
 		print("error in readlink_proc: {}".format(e))
 		sys.exit()
-#		return [ "unknown" ]
 
 	try:
 		pi_op = pi.op
 		get_link_op_addr = pi_op.proc_get_link
 
 		get_link_op_name = addr2sym(get_link_op_addr)
-#		print("get_link_op_name is {}".format(get_link_op_name))
 		if get_link_op_name == "proc_root_link":
-#			print("calling proc_root_link")
 			path = proc_root_link(dentry)
-			return [ get_pathname(path.dentry, path.mnt) ]
+			return get_pathname(path.dentry, path.mnt)
 		if get_link_op_name == "proc_cwd_link":
 			path = proc_cwd_link(dentry)
-			return [ get_pathname(path.dentry, path.mnt) ]
+			return get_pathname(path.dentry, path.mnt)
 		if get_link_op_name == "proc_fd_link":
-			return [ proc_fd_link(dentry) ]
-#			path = proc_fd_link(dentry)
-#			return [ get_pathname(path.dentry, path.mnt) ]
+			return proc_fd_link(dentry)
 		if get_link_op_name == "proc_exe_link":
-			return [ proc_exe_link(dentry) ]
+			return proc_exe_link(dentry)
 
 		print("proc_op for get_link is {}".format(get_link_op_name))
 
@@ -1190,14 +1174,14 @@ def page_get_link(dentry):
 #		print("page 0x{:016x} vaddr: 0x{:016x}".format(page, vaddr))
 		link = SmartString(readmem(vaddr, 4096), vaddr, None)
 #		print("page_get_link found link string: {}".format(link))
-		return [ link ]
+		return link
 	except Exception as e:
 		exc_info = sys.exc_info()
 		print("error finding link in {}: {}\n{}".format(inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
 		traceback.print_tb(sys.exc_info()[2])
 
 		pass
-	return [ "unknown" ]
+	return "unknown"
 
 
 def nfs_get_link(dentry):
@@ -1207,7 +1191,7 @@ def readlink_simple(dentry):
 	try:
 		inode = dentry.d_inode
 		if inode.i_link:
-			return [ inode.i_link ]
+			return inode.i_link
 	except:
 		pass
 	return [ "unknown" ]
@@ -1285,7 +1269,7 @@ def readlink(dentry):
 #			print("get_link func is {}".format(get_link_func_name))
 
 				if get_link_func_name == "simple_get_link":
-					return [ inode.i_link ]
+					return inode.i_link
 		except:
 			# unable to do ->get_link
 			pass
@@ -1294,7 +1278,7 @@ def readlink(dentry):
 
 
 
-	return [ "unknown" ]
+	return "unknown"
 
 def qstr(addr, complain=False):
 	try:
@@ -1374,15 +1358,8 @@ def output_stat_info(path, dentry, inode):
 		mode_type_string = "?"
 
 	if itype == S_IFLNK:
-		link_targets = readlink(dentry)
-		mode_type_string = "{} => ".format(mode_type_string)
-		first = True
-		for link_target in link_targets:
-			if first:
-				mode_type_string = "{} => {}".format(mode_type_string, link_target)
-				first = False
-			else:
-				mode_type_string = "{}, {}".format(mode_type_string, link_target)
+		link_target = readlink(dentry)
+		mode_type_string = "{} => {}".format(mode_type_string, link_target)
 
 	print("{ind}ino: {ino}, Size: {s:11d},  Blocks: {b},  Block size: {bs}    {typ}".format(ind=indent(1),
 		ino=ino, s=size, b=blocks, bs=bs, typ=mode_type_string))
