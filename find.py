@@ -670,19 +670,40 @@ def indent(lvl):
 	return "{spaces}".format(spaces = ' ' * 4 * lvl)
 
 XFS_IFINLINE = 0x01
+XFS_SYMLINK_MAXLEN = 1024
 def readlink_xfs(dentry):
 	try:
 		inode = dentry.d_inode
 		ip = readSU("struct xfs_inode", container_of(inode, "struct xfs_inode", "i_vnode"))
-		flags = ip.i_df.if_flags
-		if flags & XFS_IFINLINE:
-			link = ip.i_df.if_u1.if_data
-			return link
-		else:
-			return "unkown (xfs symlink not inline)"
-	except Exception as e:
-		print("error with readlink_xfs: {}".format(e))
+	except:
 		pass
+		return "unknown"
+
+	if struct_has_member("xfs_ifork", "if_flags"):
+		try:
+			flags = ip.i_df.if_flags
+			if flags & XFS_IFINLINE:
+				link = ip.i_df.if_u1.if_data
+				return link
+			else:
+				return "unknown (xfs symlink not inline)"
+		except:
+			pass
+	else:
+		pathlen = ip.i_disk_size
+		if not pathlen:
+			return "pathlen length 0"
+		if pathlen < 0 or pathlen > XFS_SYMLINK_MAXLEN:
+			return "bad symlink length {}".format(pathlen)
+		try:
+			if ip.i_df.if_format == enumerator_value("XFS_DINODE_FMT_LOCAL"):
+				return ip.i_df.if_u1.if_data
+#				return readmem(ip.i_df.if_u1.if_data, pathlen + 1)
+			else:
+				return "unknown (xfs_symlink not inline)"
+		except:
+			pass
+
 	return "unknown"
 
 def readlink_kernfs(dentry):
@@ -1231,6 +1252,8 @@ def readlink(dentry):
 		pass
 
 
+	if fstype == "xfs":
+		return readlink_xfs(dentry)
 	if fstype == "sysfs":
 		return readlink_kernfs(dentry)
 	if fstype == "proc":
@@ -1270,8 +1293,6 @@ def readlink(dentry):
 #			return readlink_proc(dentry)
 
 
-	if fstype == "xfs":
-		return [ readlink_xfs(dentry) ]
 
 	return [ "unknown" ]
 
