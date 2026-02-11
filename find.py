@@ -1294,6 +1294,18 @@ def qstr(addr, complain=False):
 		pass
 	return ""
 
+def d_cache_type(dentry):
+	typ = dentry.d_flags & DFLAGS['DCACHE_ENTRY_TYPE']
+	if typ == DFLAGS['DCACHE_MISS_TYPE']: return "miss"
+	if typ == DFLAGS['DCACHE_WHITEOUT_TYPE']: return "whiteout"
+	if typ == DFLAGS['DCACHE_DIRECTORY_TYPE']: return "directory"
+	if typ == DFLAGS['DCACHE_AUTODIR_TYPE']: return "autodir"
+	if typ == DFLAGS['DCACHE_REGULAR_TYPE']: return "file"
+	if typ == DFLAGS['DCACHE_SPECIAL_TYPE']: return "other"
+	if typ == DFLAGS['DCACHE_SYMLINK_TYPE']: return "symlink"
+	return "unknown"
+
+
 # takes path, dentry, inode
 def output_stat_info(path, dentry, inode):
 	if dentry == 0: return
@@ -1313,17 +1325,6 @@ def output_stat_info(path, dentry, inode):
 			d_entry_type = dentry.d_flags & DFLAGS['DCACHE_ENTRY_TYPE']
 		except:
 			return
-
-#		if d_entry_type == DFLAGS['DCACHE_MISS_TYPE']:
-#			# miss
-#define DCACHE_MISS_TYPE                0x00000000 /* Negative dentry (maybe fallthru to nowhere) */
-#define DCACHE_WHITEOUT_TYPE            0x00100000 /* Whiteout dentry (stop pathwalk) */
-#define DCACHE_DIRECTORY_TYPE           0x00200000 /* Normal directory */
-#define DCACHE_AUTODIR_TYPE             0x00300000 /* Lookupless directory (presumed automount) */
-#define DCACHE_REGULAR_TYPE             0x00400000 /* Regular file type (or fallthru to such) */
-#define DCACHE_SPECIAL_TYPE             0x00500000 /* Other file type (or fallthru to such) */
-#define DCACHE_SYMLINK_TYPE             0x00600000 /* Symlink (or fallthru to such) */
-
 
 		try:
 			i_mode = inode.i_mode
