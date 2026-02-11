@@ -24,6 +24,10 @@ KERNFS_DIR = enumerator_value("KERNFS_DIR")
 KERNFS_FILE = enumerator_value("KERNFS_FILE")
 KERNFS_LINK = enumerator_value("KERNFS_LINK")
 
+def struct_has_member(struct, member):
+	if (member_size("struct {}".format(struct), member) != -1):
+		return 1
+	return 0
 
 def rhel_major_version():
 	if not is_rhel():
@@ -1441,6 +1445,30 @@ def get_dentry_name(dentry, complain=True):
 	return "<name freed>"
 
 
+if struct_has_member("dentry", "d_children"):
+	def dentry_children(dentry):
+		return dentry.d_children
+	def dentry_sibling(dentry):
+		return dentry.d_sib
+	def container_of_dentry_sibling(addr):
+		return readSU("struct dentry", container_of(addr, "struct dentry", "d_sib"))
+	def all_dentry_children(dentry):
+		ret = []
+		for dentry in hlist_for_each_entry("struct dentry", dentry.d_children, "d_sib"):
+			ret.append(dentry)
+		return ret
+else:
+	def dentry_children(dentry):
+		return dentry.d_subdirs
+	def dentry_sibling(dentry):
+		return dentry.d_child
+	def container_of_dentry_sibling(addr):
+		return readSU("struct dentry", container_of(addr, "struct dentry", "d_child"))
+	def all_dentry_children(dentry):
+		return readSUListFromHead(dentry.d_subdirs, "d_child", "struct dentry", maxel=maxel)
+
+def dentry_next_sibling(dentry):
+	return container_of_dentry_sibling(dentry_sibling(dentry).next)
 
 def find_recurse(path="/", addr=0, depth=1):
 	if addr == 0: return
