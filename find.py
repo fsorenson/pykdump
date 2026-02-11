@@ -10,8 +10,11 @@ import inspect
 __author__ = "Frank Sorenson <sorenson@redhat.com>"
 __version__ = "1.1.0"
 
-maxel = 2000000
-_MAXEL = maxel
+_MAXEL = 2000000
+maxel = _MAXEL
+_MAXTOTAL = 2000000
+maxtotal = _MAXTOTAL
+total_count = 0
 verbosity = 0
 DEBUG = 0
 maxdepth = 0
@@ -1461,7 +1464,9 @@ def dentry_next_sibling(dentry):
 	return container_of_dentry_sibling(dentry_sibling(dentry).next)
 
 def find_recurse(path="/", addr=0, depth=1):
-	if addr == 0: return
+	global total_count
+
+	if not addr: return
 	if maxdepth > 0 and depth > maxdepth:
 		return
 
@@ -1558,6 +1563,8 @@ if __name__ == "__main__":
 	opts_parser.add_argument("--maxdepth", dest = 'maxdepth', type=int, default = -1, help = "set a maximum subdirectory depth")
 	opts_parser.add_argument("--nonegative", dest = 'nonegative', default = False, action = "store_true", help = "suppress display of negative dentries")
 	opts_parser.add_argument("--norecurse", '-d', dest = 'norecurse', default = False, action = "store_true", help = "only show info for listed dentries")
+	opts_parser.add_argument("--maxcount", dest = 'maxcount', type=int, default = _MAXEL, help = "set a maximum number of directory entries per directory")
+	opts_parser.add_argument("--maxtotal", dest = 'maxtotal', type=int, default = _MAXTOTAL, help = "set a maximum total number of directory entries")
 
 	addrs_parser = argparse.ArgumentParser()
 	addrs_parser.add_argument('addrs', action = 'store', nargs = '*')
@@ -1568,6 +1575,8 @@ if __name__ == "__main__":
 	verbose = opts.verbose
 	maxdepth = opts.maxdepth
 	show_negative = not(opts.nonegative)
+	maxel = opts.maxcount
+	maxtotal = opts.maxtotal
 	if opts.norecurse:
 		recurse = False
 
