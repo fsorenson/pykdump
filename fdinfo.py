@@ -26,6 +26,11 @@ def arg_value(arg):
 	except ValueError:
 		return 0
 
+def has_member(struct, member):
+	if member_size(struct, member) == -1:
+		return False
+	return True
+
 def file_inode(filp):
 	try:
 		filp = readSU("struct file", filp)
@@ -296,6 +301,84 @@ def display_file_fdinfo(addr):
 
 	print("")
 
+def display_pid_fdinfo(pid, fds=None):
+	t = readSU("struct task_struct", pid_to_task(int(pid)))
+	if not t:
+		return
+
+	mm = t.mm
+	exe_path = get_pathname(t.mm.exe_file.f_path.dentry, t.mm.exe_file.f_path.mnt)
+	print("PID: {} (struct task_struct *)0x{:016x}  '{}'  '{}'".format(
+		pid, t, t.comm, exe_path))
+
+	files = t.files
+
+	fs_struct = t.fs
+	pid_root_path = fs_struct.root
+	pid_pwd_path = fs_struct.pwd
+	root_dentry = pid_root_path.dentry
+	root_path = get_pathname(pid_root_path.dentry, pid_root_path.mnt)
+	pwd_dentry = pid_pwd_path.dentry
+	pwd_path = get_pathname(pid_pwd_path.dentry, pid_pwd_path.mnt)
+
+
+	print("root: {}, pwd: {}".format(root_path, pwd_path))
+
+	max_fdset = -1
+	max_fds = -1
+
+	if has_member("struct files_struct", "max_fdset"):
+		max_fdset = files.max_fdset
+		max_fds = files.max_fds
+
+	fdtable = None
+
+	if has_member("struct files_struct", "fdt"):
+		fdtable = files.fdt
+
+		if fdtable and has_member("struct fdtable", "max_fdset"):
+			max_fdset = fdtable.max_fdset
+		else:
+			max_fdset = -1
+		max_fds = fdtable.max_fds
+
+	if (has_member("struct files_struct", "fdt") and not fdtable) or (not files or max_fdset == 0 or max_fds == 0):
+		print("no open files?")
+		return
+
+	if has_member("struct fdtable", "open_fds"):
+		open_fds = fdtable.open_fds
+	else:
+		open_fds = files.open_fds
+
+	if not open_fds:
+		print("no open_fds?")
+		return
+
+	if has_member("struct fdtable", "fd"):
+		fd = fdtable.fd
+	else:
+		fd = files.fd
+
+	j = 0
+	while True:
+		i = j * BITS_PER_LONG
+		if (max_fdset >= 0 and i >= max_fdset) or (i >= max_fds):
+			break
+		sett = open_fds[j]
+		j += 1
+		while sett:
+			if sett & 1:
+				if not fds or any(x == i for x in fds):
+					file = fd[i]
+					if file:
+						print("fd {}  ".format(i), end='')
+						display_file_fdinfo(file)
+						print("")
+			i += 1
+			sett >>= 1
+
+
 if __name__ == "__main__":
 	opts_parser = argparse.ArgumentParser()
 	opts_parser.add_argument('--file', dest = 'files', action = 'store', nargs = '*')
@@ -314,6 +397,13 @@ if __name__ == "__main__":
 	elif (opts.pids and len(opts.pids) > 1) and (opts.fds and len(opts.fds)):
 		print("Can't specify fds for more than one pid")
 	elif opts.pids and len(opts.pids):
+		for pid in opts.pids:
+			if opts.fds and len(opts.fds):
+				print("have fds: {}".format(opts.fds))
+				fds = [int(item) for item in opts.fds]
+				display_pid_fdinfo(pid, fds)
+			else:
+				display_pid_fdinfo(pid)
 	elif opts.fds and len(opts.fds):
 		print("Must specify a pid in order to show fds")
 	else:
