@@ -1470,57 +1470,19 @@ def find_recurse(path="/", addr=0, depth=1):
 	if maxdepth > 0 and depth > maxdepth:
 		return
 
-
 	dentry = readSU("struct dentry", addr)
 
-#	print("in find_recurse")
-	subdirs_offset = container_of(0, "struct dentry", "d_u")
-#	subdirs_offset = container_of(0, "struct dentry", "d_subdirs")
-#	subdirs_offset = container_of(0, "struct dentry", "d_child")
-#	subdirs_offset = 0
-
-#	print("d_child offset: {}".format(container_of(0, "struct dentry", "d_child")))
-#	print("subdirs_offset: {}".format(container_of(0, "struct dentry", "d_subdirs")))
-
-	try:
-		d_subdirs_head = int(dentry.d_subdirs)
-		if d_subdirs_head == 0:
-			return
-	except Exception as e:
-		exc_info = sys.exc_info()
-		print("error reading subdirs head in {}: {}\n{}".format(inspect.currentframe().f_code.co_name, e, sys.exc_info()[2]))
-		traceback.print_tb(sys.exc_info()[2])
-		sys.exit()
-
-#	print("subdirs head: 0x{:016x}".format(d_subdirs_head))
-	next = d_subdirs_head
-	while 42:
-		try:
-			next = readPtr(next)
-		except crash.error as e:
-			print("error: {}".format(e))
-			print(e)
+	child_dentries = all_dentry_children(dentry)
+	for dentry in child_dentries:
+		total_count += 1
+		if total_count > maxtotal:
+			print("reached max count of {} total directory entries".format(maxtotal))
 			break
-#		print("here 7 - next: 0x{:016x}, head: 0x{:016x}".format(next, d_subdirs_head))
-		if (next == 0) or (next == d_subdirs_head):
-			break
-		try:
-			dentry = readSU("struct dentry", next + subdirs_offset)
-			inode = dentry.d_inode
-		except Exception as e:
-			print("error in find_recurse: {}".format(e))
-			raise
-			inode = 0
-			pass
-		dentry_name = get_dentry_name(dentry, complain=False)
-		if len(dentry_name) == 0:
-			continue
 
-		new_path = path + "/" + dentry_name
-		output_stat_info(new_path, dentry, inode)
+		inode = dentry.d_inode
+		dentry_name = get_pathname(dentry, 0)
 
-#		check_d_alias(dentry)
-#		check_d_child(dentry)
+		output_stat_info(dentry_name, dentry, inode)
 
 		if inode:
 			try:
@@ -1528,7 +1490,7 @@ def find_recurse(path="/", addr=0, depth=1):
 				i_type = i_mode & S_IFMT
 
 				if S_ISDIR(i_mode):
-					find_recurse(new_path, dentry, depth=depth+1)
+					find_recurse(path, dentry, depth=depth+1)
 			except:
 				pass
 
@@ -1536,7 +1498,7 @@ def find_recurse_begin(path="/", addr=0):
 	if addr == 0: return
 
 	dentry = readSU("struct dentry", addr)
-	dentry_name = get_dentry_name(dentry)
+	dentry_name = get_pathname(dentry, 0)
 
 	path = "0x{:016x}({})".format(dentry, dentry_name)
 
