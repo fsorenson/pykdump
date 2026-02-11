@@ -1394,29 +1394,6 @@ def cleanup_str(str):
 			new_str += a
 	return new_str
 
-
-def check_d_child(dentry):
-	try:
-#		childs = dentry.d_child
-		childs = dentry.d_u
-
-		child_list = readListByHead(childs)
-		if len(child_list):
-			print("dentry 0x{:016x} has {} 'd_child's".format(dentry, len(child_list)))
-	except:
-		pass
-
-def check_d_alias(dentry):
-	try:
-		aliases = dentry.d_alias
-
-		alias_list = readListByHead(aliases)
-		if len(alias_list):
-			print("dentry 0x{:016x} has {} aliases".format(dentry, len(alias_list)))
-	except:
-		pass
-
-
 def get_dentry_name(dentry, complain=True):
 	# was the filename embedded?  can we use the name?
 	name_ptr = readPtr(Addr(dentry.d_name, extra='name'))
