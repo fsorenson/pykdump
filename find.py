@@ -16,7 +16,7 @@ verbosity = 0
 DEBUG = 0
 maxdepth = 0
 recurse = True
-show_stale = True
+show_negative = True
 
 #define KERNFS_TYPE_MASK        0x000f
 KERNFS_TYPE_MASK = 0x000f
@@ -941,7 +941,7 @@ def readlink_proc_fd(dentry):
 			return path_get_pathname(f.f_path)
 		else:
 #			print("fd {} - file 0x{:016x} does not appear to have a target dentry".format(fd, f))
-			return "<stale>"
+			return "<negative>"
 
 		target_dentry = file_dentry(f)
 #		print("here 15; target_dentry: 0x{:016x}".format(target_dentry))
@@ -1309,23 +1309,14 @@ def d_cache_type(dentry):
 # takes path, dentry, inode
 def output_stat_info(path, dentry, inode):
 	if dentry == 0: return
-	try:
-		foo = readmem(dentry, getSizeOf("dentry"))
-	except:
-		return
 
-	if inode == 0:
-		if not show_stale: return
-		print("{:11s}  dentry: 0x{:016x}, {} (stale)".format(
+	typ = d_cache_type(dentry)
+
+	if typ == "miss" or not inode:
+		if not show_negative: return
+		print("{:11s}  dentry: 0x{:016x}, {} (negative)".format(
 			"???????????", dentry, path))
-#		print("zero inode.  dentry: {}".format(dentry))
-#		print("path:  {}".format(path))
 	else:
-		try:
-			d_entry_type = dentry.d_flags & DFLAGS['DCACHE_ENTRY_TYPE']
-		except:
-			return
-
 		try:
 			i_mode = inode.i_mode
 			itype = i_mode & S_IFMT
@@ -1343,7 +1334,7 @@ def output_stat_info(path, dentry, inode):
 	if verbose:
 		print("{}.d_flags: 0x{:08x} - {}".format(indent(2), dentry.d_flags, flags_to_string(dentry.d_flags, DFLAGS)))
 
-	if inode == 0:
+	if typ == "miss" or inode == 0:
 		return
 
 	try:
@@ -1565,7 +1556,7 @@ if __name__ == "__main__":
 	opts_parser = argparse.ArgumentParser()
 	opts_parser.add_argument('--verbose', '-v', dest = 'verbose', default = 0, action = 'count', help = "increase verbosity")
 	opts_parser.add_argument("--maxdepth", dest = 'maxdepth', type=int, default = -1, help = "set a maximum subdirectory depth")
-	opts_parser.add_argument("--nostale", dest = 'nostale', default = False, action = "store_true", help = "suppress display of stale entries")
+	opts_parser.add_argument("--nonegative", dest = 'nonegative', default = False, action = "store_true", help = "suppress display of negative dentries")
 	opts_parser.add_argument("--norecurse", '-d', dest = 'norecurse', default = False, action = "store_true", help = "only show info for listed dentries")
 
 	addrs_parser = argparse.ArgumentParser()
@@ -1576,7 +1567,7 @@ if __name__ == "__main__":
 
 	verbose = opts.verbose
 	maxdepth = opts.maxdepth
-	show_stale = not(opts.nostale)
+	show_negative = not(opts.nonegative)
 	if opts.norecurse:
 		recurse = False
 
