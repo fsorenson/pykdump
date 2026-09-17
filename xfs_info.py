@@ -1352,26 +1352,72 @@ def show_xfs_ail(addr, ilvl=0):
 			pass
 
 
+def xfs_log_used_blocks(head_cycle, tail_cycle, head_block, tail_block, blocks_per_cycle, ilvl=0):
+	"""
+	Blocks of XFS log space currently in use, given head (write pointer)
+	and tail (oldest uncommitted item) LSNs, decomposed into cycle/block.
+
+	blocks_per_cycle should equal logBBsize (total log size in blocks) --
+	a "cycle" in an XFS log LSN is exactly one full wrap of the log.
+	"""
+	cycle_diff = head_cycle - tail_cycle
+	if (cycle_diff < 0):
+		print("{}error: tail 0x{:x} is ahead of head 0x{:x} -- corrupt LSNs or swapped args".format(
+			indent_str(ilvl), tail_cycle, head_cycle))
+		return -1
+	else:
+		used_blocks = cycle_diff * blocks_per_cycle + (head_block - tail_block)
+		if (used_blocks < 0) or (used_blocks > blocks_per_cycle):
+			print("{}error: used_blocks {used_blocks} out of range [0, {blocks_per_cycle}]".format(indent_str(ilvl)))
+			return -1
+		else:
+			return used_blocks
+
+
 def show_xlog(addr, ilvl=0):
 	print("{}(struct xlog *)0x{:016x}".format(indent_str(ilvl), addr))
 
-	if not check_prune("xlog", addr):
+	if check_prune("xlog", addr):
+		return
 
+	xlog = readSU("struct xlog", addr)
+	try:
+
+		logsize = xlog.l_logsize
+		log_blocks = xlog.l_logBBsize
+#		log_blocksize = xlog.l_logsize / xlog.l_logBBsize
+#		BBSIZE
+
+		head_cycle = xlog.l_curr_cycle
+		head_block = xlog.l_curr_block
+
+		l_tail_lsn = xlog.l_tail_lsn.counter
+		tail_cycle = l_tail_lsn >> 32
+		tail_block = l_tail_lsn & 0xffffffff
+
+		used_blocks = xfs_log_used_blocks(head_cycle, tail_cycle, head_block, tail_block, log_blocks)
+		if used_blocks >= 0:
+			used_pct = 100 * used_blocks / log_blocks
+			free_blocks = log_blocks - used_blocks
+			print("{}log usage {}/{} ({}%)".format(indent_str(ilvl+1), used_blocks, log_blocks, used_pct))
+	except Exception as e:
+		print("error printing xlog 0x{:016x}: {}".format(xlog, e))
+		pass
+	try:
+		show_xfs_mount(xlog.l_mp)
+
+#		print("{}what info to show for xlog?".format(indent_str(ilvl)))
+		cilp = xlog.l_cilp
+		if cilp:
+			show_xfs_cil(cilp, ilvl=ilvl+1)
 		try:
-			xlog = readSU("struct xlog", addr)
-
-			show_xfs_mount(xlog.l_mp)
-
-#			print("{}what info to show for xlog?".format(indent_str(ilvl)))
-			cilp = xlog.l_cilp
-			if cilp:
-				show_xfs_cil(cilp, ilvl=ilvl+1)
 			show_xfs_buf(xlog.l_xbuf, ilvl=ilvl+1)
-#			show_xfs_buftarg # TODO
-			show_struct_member_TODO(xlog.l_targ, member_name="l_targ", member_type="xfs_buftarg", ilvl=ilvl)
-
 		except:
 			pass
+#		show_xfs_buftarg # TODO
+		show_struct_member_TODO(xlog.l_targ, member_name="l_targ", member_type="xfs_buftarg", ilvl=ilvl)
+	except:
+		pass
 
 def show_xfs_info(addr, ilvl=0):
 	print("{}(struct xfs_mount *)0x{:016x}".format(indent_str(ilvl), addr))
@@ -1380,6 +1426,7 @@ def show_xfs_info(addr, ilvl=0):
 		return
 
 	xfs_mount = readSU("struct xfs_mount", addr)
+	show_xlog(xfs_mount.m_log, ilvl=ilvl+1)
 	sbp = xfs_mount.m_sb
 
 	print("{}(struct xfs_sb *)0x{:016x}".format(indent_str(ilvl), sbp))
@@ -1489,7 +1536,13 @@ def show_xfsstats(addr, ilvl=0):
 
 def show_xfs_mount(addr, ilvl=0):
 	mp = readSU("struct xfs_mount", addr)
+
+	if check_prune("xfs_mount", addr):
+		return
+
 	show_xfs_info(addr, ilvl=ilvl+1)
+
+	show_xlog(mp.xlog, ilvl=ilvl+1)
 
 	xfsstats = mp.m_stats.xs_stats
 	show_xfsstats(xfsstats, ilvl=ilvl+1)
