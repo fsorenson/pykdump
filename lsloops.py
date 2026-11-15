@@ -7,10 +7,8 @@ if __name__ == "__main__":
 	if mypath not in sys.path:
 		sys.path.append(mypath)
 
-from fs_lib import *
-#from file import *
+from sorenson_lib import *
 from pykdump.API import *
-#from misc.percpu import get_per_cpu
 
 
 from LinuxDump.Tasks import TaskTable

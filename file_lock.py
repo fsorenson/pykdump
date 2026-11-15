@@ -6,31 +6,23 @@ import sys, os
 
 if __name__ == "__main__":
 	mypath = os.path.dirname(os.path.realpath(sys.argv[0]))
-	check_paths = [mypath, "/cores/crashext/epython/"]
+	check_paths = [mypath]
 	for p in check_paths:
 		if os.path.isdir(p):
 			if p not in sys.path:
 				sys.path.append(p)
 
-#from misc.percpu import get_per_cpu
 from pykdump.API import *
 from pykdump.Generic import SUInfo
 from LinuxDump.Tasks import TaskTable
 from LinuxDump.inet.proto import *
-from libs.sorenson import *
+#from libs.sorenson import *
 
-
-from fs_lib import *
+from sorenson_lib import *
 try:
 	from rpc_credcache import show_cred_short
 except Exception as ex:
 	pass
-
-@struct_printer
-def pp_struct_file_lock(file_lock, rlvl, ilvl):
-	print("{}file_lock stuff, dude".format(indent_str(ilvl)))
-
-
 
 # stolen from skywalker...  needs to go into a lib
 class get_per_cpu_foo():

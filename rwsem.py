@@ -2,8 +2,6 @@
 
 from __future__ import print_function
 
-#from fs_lib import *
-#from dumpobj import *
 from LinuxDump import *
 from LinuxDump.Tasks import *
 from LinuxDump.Tasks import TASK_STATE, TaskTable

@@ -1,6 +1,6 @@
 #!/usr/bin/python
 
-from fs_lib import *
+from sorenson_lib import *
 from LinuxDump.percpu import *
 
 def usage():

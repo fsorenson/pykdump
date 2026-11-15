@@ -1,7 +1,5 @@
 #!/usr/bin/python
 
-#from fs_lib import *
-#from dumpobj import *
 from LinuxDump import *
 from LinuxDump.Tasks import *
 from LinuxDump.Tasks import TASK_STATE, TaskTable
@@ -218,7 +216,6 @@ def display_autofs_sbi(sbi):
 		for ai in expiring_list:
 			display_autofs_info(ai)
 
-#	print("{} queues".format(len(queues)))
 	q = []
 	for awq in queues:
 		wq = awq
@@ -226,7 +223,6 @@ def display_autofs_sbi(sbi):
 			wq = readSU("struct autofs_wait_queue", wq)
 			q.append(wq)
 			wq = wq.next
-#	print("qlen: {}".format(len(q)))
 	if len(q):
 		print("{}autofs_wait_queue: {}".format(ind(1), len(q)))
 		for awq in q:

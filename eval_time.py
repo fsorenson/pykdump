@@ -4,7 +4,7 @@ import sys, os
 mypath = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(mypath)
 
-from fs_lib import *
+from sorenson_lib import *
 
 def usage():
 	print("usage: eval_time <value>")

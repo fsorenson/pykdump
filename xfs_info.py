@@ -2,8 +2,6 @@
 
 from __future__ import print_function
 
-#from fs_lib import *
-#from misc.percpu import get_per_cpu
 from pykdump.API import *
 try:
 	from pykdump.Generic import SUInfo
@@ -13,8 +11,7 @@ from LinuxDump.Tasks import TaskTable
 from LinuxDump.inet.proto import *
 from libs.sorenson import *
 
-
-from fs_lib import *
+from sorenson_lib import *
 #import ppstruct_vars
 
 def ntohll(x):

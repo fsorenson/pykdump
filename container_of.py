@@ -10,7 +10,7 @@ if __name__ == "__main__":
 			if p not in sys.path:
 				sys.path.append(p)
 
-from fs_lib import *
+from sorenson_lib import *
 
 def usage():
 	print("usage: container_of <address> <struct_name> <member>")

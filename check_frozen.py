@@ -4,9 +4,7 @@ import argparse
 import re
 from pykdump.API import *
 from LinuxDump.Tasks import TaskTable
-from fs_lib import *
-
-pp = pprint.PrettyPrinter(indent=4)
+from sorenson_lib import *
 
 SPACER      = "    "
 DEBUG       = " - DEBUG - "
