@@ -1497,19 +1497,19 @@ def get_arg_value(arg):
 		return 0
 
 if __name__ == "__main__":
-	opts_parser = argparse.ArgumentParser()
-	opts_parser.add_argument('--verbose', '-v', dest = 'verbose', default = 0, action = 'count', help = "increase verbosity")
-	opts_parser.add_argument("--maxdepth", dest = 'maxdepth', type=int, default = -1, help = "set a maximum subdirectory depth")
-	opts_parser.add_argument("--nonegative", dest = 'nonegative', default = False, action = "store_true", help = "suppress display of negative dentries")
-	opts_parser.add_argument("--norecurse", '-d', dest = 'norecurse', default = False, action = "store_true", help = "only show info for listed dentries")
-	opts_parser.add_argument("--maxcount", dest = 'maxcount', type=int, default = _MAXEL, help = "set a maximum number of directory entries per directory")
-	opts_parser.add_argument("--maxtotal", dest = 'maxtotal', type=int, default = _MAXTOTAL, help = "set a maximum total number of directory entries")
+	parser = argparse.ArgumentParser()
+	parser.add_argument('--verbose', '-v', dest = 'verbose', default = 0, action = 'count', help = "increase verbosity")
+	parser.add_argument("--maxdepth", dest = 'maxdepth', type=int, default = -1, help = "set a maximum subdirectory depth")
+	parser.add_argument("--nonegative", dest = 'nonegative', default = False, action = "store_true", help = "suppress display of negative dentries")
+	parser.add_argument("--norecurse", '-d', dest = 'norecurse', default = False, action = "store_true", help = "only show info for listed dentries")
+	parser.add_argument("--maxcount", dest = 'maxcount', type=int, default = _MAXEL, help = "set a maximum number of directory entries per directory")
+	parser.add_argument("--maxtotal", dest = 'maxtotal', type=int, default = _MAXTOTAL, help = "set a maximum total number of directory entries")
+	parser.add_argument('addrs', metavar = 'DENTRY', nargs = '*', help = "dentry address(es) to search")
 
-	addrs_parser = argparse.ArgumentParser()
-	addrs_parser.add_argument('addrs', action = 'store', nargs = '*')
-
-	opts, remain = opts_parser.parse_known_args(sys.argv[1:])
-	opts = addrs_parser.parse_args(remain, opts)
+	opts = parser.parse_args()
+	if not opts.addrs:
+		parser.print_help()
+		sys.exit(0)
 
 	verbose = opts.verbose
 	maxdepth = opts.maxdepth
@@ -1521,7 +1521,6 @@ if __name__ == "__main__":
 
 	for addr_str in opts.addrs:
 		try:
-
 			addr = get_arg_value(addr_str)
 			if addr:
 				find_recurse_begin("0x{:016x}".format(addr), addr)
