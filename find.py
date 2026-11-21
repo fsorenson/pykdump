@@ -1313,9 +1313,7 @@ def d_cache_type(dentry):
 def output_stat_info(path, dentry, inode):
 	if dentry == 0: return
 
-	typ = d_cache_type(dentry)
-
-	if typ == "miss" or not inode:
+	if not inode:
 		if not show_negative: return
 		print("{:11s}  dentry: 0x{:016x}, {} (negative)".format(
 			"???????????", dentry, path))
@@ -1337,7 +1335,7 @@ def output_stat_info(path, dentry, inode):
 	if verbose:
 		print("{}.d_flags: 0x{:08x} - {}".format(indent(2), dentry.d_flags, flags_to_string(dentry.d_flags, DFLAGS)))
 
-	if typ == "miss" or inode == 0:
+	if not inode:
 		return
 
 	try:
