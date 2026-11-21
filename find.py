@@ -23,6 +23,8 @@ recurse = True
 cross_mounts = True
 show_negative = True
 mountpoints = {}
+root_to_mount = {}
+sb_to_mount = {}
 
 #define KERNFS_TYPE_MASK        0x000f
 KERNFS_TYPE_MASK = 0x000f
@@ -1441,14 +1443,16 @@ else:
 def dentry_next_sibling(dentry):
 	return container_of_dentry_sibling(dentry_sibling(dentry).next)
 
-def get_mountpoints():
+def build_mount_maps():
 	mpts = {}
+	r2m = {}
+	s2m = {}
 	tt = TaskTable()
 	task = tt.getByPid(1)
 	if not task or not task.nsproxy or not task.nsproxy.mnt_ns:
 		task = readSymbol("init_task")
 	if not task or not task.nsproxy or not task.nsproxy.mnt_ns:
-		return mpts
+		return mpts, r2m, s2m
 
 	mnt_ns = task.nsproxy.mnt_ns
 	if mnt_ns.hasField("mounts"):
@@ -1456,14 +1460,54 @@ def get_mountpoints():
 	elif mnt_ns.hasField("list"):
 		mounts = readSUListFromHead(mnt_ns.list, "mnt_list", "struct mount")
 	else:
-		return mpts
+		return mpts, r2m, s2m
 
 	for m in mounts:
 		mp = m.mnt_mountpoint
 		root = m.mnt.mnt_root
+		if root:
+			r2m[int(root)] = m
+		if m.mnt.mnt_sb:
+			s2m.setdefault(int(m.mnt.mnt_sb), m)
 		if mp and root and int(mp) != int(root):
 			mpts[int(mp)] = root
-	return mpts
+	return mpts, r2m, s2m
+
+
+def get_full_pathname(dentry):
+	parts = []
+	seen = set()
+	cur = dentry
+	while cur and int(cur) not in seen:
+		seen.add(int(cur))
+		parent = cur.d_parent
+		if not parent or int(cur) == int(parent):
+			m = root_to_mount.get(int(cur)) or sb_to_mount.get(int(cur.d_sb))
+			if m and m.mnt_mountpoint and int(m.mnt_mountpoint) != int(cur):
+				cur = m.mnt_mountpoint
+				continue
+			break
+		name = cleanup_str(str(qstr(cur.d_name, False), 'utf-8'))
+		if name:
+			parts.append(name)
+		cur = parent
+	return "/" + "/".join(reversed(parts)) if parts else "/"
+
+
+def get_mount_prefix(dentry):
+	cur = dentry
+	seen = set()
+	while cur and int(cur) not in seen:
+		seen.add(int(cur))
+		parent = cur.d_parent
+		if not parent or int(cur) == int(parent):
+			m = root_to_mount.get(int(cur)) or sb_to_mount.get(int(cur.d_sb))
+			if m and m.mnt_mountpoint and int(m.mnt_mountpoint) != int(cur):
+				p = get_full_pathname(m.mnt_mountpoint)
+				return "" if p == "/" else p.rstrip("/")
+			return ""
+		cur = parent
+	return ""
 
 
 def find_recurse(path="/", addr=0, depth=1, prefix="", visited=None):
@@ -1512,7 +1556,7 @@ def find_recurse_begin(path="/", addr=0):
 	if addr == 0: return
 
 	dentry = readSU("struct dentry", addr)
-	dentry_name = get_pathname(dentry, 0)
+	dentry_name = get_full_pathname(dentry)
 
 	path = "0x{:016x}({})".format(dentry, dentry_name)
 
@@ -1523,7 +1567,7 @@ def find_recurse_begin(path="/", addr=0):
 			new_prefix = "" if dentry_name == "/" else dentry_name.rstrip("/")
 			find_recurse(path, mnt_root, prefix=new_prefix)
 		else:
-			find_recurse(path, dentry)
+			find_recurse(path, dentry, prefix=get_mount_prefix(dentry))
 
 
 def get_root_dentry():
@@ -1573,8 +1617,7 @@ if __name__ == "__main__":
 	if opts.norecurse:
 		recurse = False
 	cross_mounts = not opts.xdev
-	if cross_mounts:
-		mountpoints = get_mountpoints()
+	mountpoints, root_to_mount, sb_to_mount = build_mount_maps()
 
 	for addr_str in opts.addrs:
 		try:
