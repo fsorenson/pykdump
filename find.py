@@ -1482,6 +1482,17 @@ def find_recurse_begin(path="/", addr=0):
 		find_recurse(path, dentry)
 
 
+def get_root_dentry():
+	tt = TaskTable()
+	task = tt.getByPid(1)
+	if task and task.fs and task.fs.root.dentry:
+		return int(task.fs.root.dentry)
+	init_task = readSymbol("init_task")
+	if init_task and init_task.fs and init_task.fs.root.dentry:
+		return int(init_task.fs.root.dentry)
+	return 0
+
+
 def get_arg_value(arg):
 	try:
 		if arg.lower().startswith('0x'):
@@ -1519,9 +1530,14 @@ if __name__ == "__main__":
 
 	for addr_str in opts.addrs:
 		try:
-			addr = get_arg_value(addr_str)
+			if addr_str == "/":
+				addr = get_root_dentry()
+			else:
+				addr = get_arg_value(addr_str)
 			if addr:
 				find_recurse_begin("0x{:016x}".format(addr), addr)
+			else:
+				print("error: unable to resolve '{}'".format(addr_str))
 		except Exception as e:
 			print("error: {}".format(e))
 
