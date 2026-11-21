@@ -4,6 +4,7 @@ import os, sys
 from pykdump.API import *
 from LinuxDump.fs.dcache import *
 from LinuxDump.Tasks import (TaskTable, Task)
+from LinuxDump.trees import for_all_rbtree
 import argparse
 import inspect
 
@@ -19,7 +20,9 @@ verbosity = 0
 DEBUG = 0
 maxdepth = 0
 recurse = True
+cross_mounts = True
 show_negative = True
+mountpoints = {}
 
 #define KERNFS_TYPE_MASK        0x000f
 KERNFS_TYPE_MASK = 0x000f
@@ -1438,12 +1441,44 @@ else:
 def dentry_next_sibling(dentry):
 	return container_of_dentry_sibling(dentry_sibling(dentry).next)
 
-def find_recurse(path="/", addr=0, depth=1):
+def get_mountpoints():
+	mpts = {}
+	tt = TaskTable()
+	task = tt.getByPid(1)
+	if not task or not task.nsproxy or not task.nsproxy.mnt_ns:
+		task = readSymbol("init_task")
+	if not task or not task.nsproxy or not task.nsproxy.mnt_ns:
+		return mpts
+
+	mnt_ns = task.nsproxy.mnt_ns
+	if mnt_ns.hasField("mounts"):
+		mounts = for_all_rbtree(mnt_ns.mounts, "struct mount", "mnt_node")
+	elif mnt_ns.hasField("list"):
+		mounts = readSUListFromHead(mnt_ns.list, "mnt_list", "struct mount")
+	else:
+		return mpts
+
+	for m in mounts:
+		mp = m.mnt_mountpoint
+		root = m.mnt.mnt_root
+		if mp and root and int(mp) != int(root):
+			mpts[int(mp)] = root
+	return mpts
+
+
+def find_recurse(path="/", addr=0, depth=1, prefix="", visited=None):
 	global total_count
 
 	if not addr: return
+	if total_count > maxtotal: return
 	if maxdepth > 0 and depth > maxdepth:
 		return
+
+	if visited is None:
+		visited = set()
+	if int(addr) in visited:
+		return
+	visited.add(int(addr))
 
 	dentry = readSU("struct dentry", addr)
 
@@ -1452,20 +1487,24 @@ def find_recurse(path="/", addr=0, depth=1):
 		total_count += 1
 		if total_count > maxtotal:
 			print("reached max count of {} total directory entries".format(maxtotal))
-			break
+			return
 
 		inode = dentry.d_inode
 		dentry_name = get_pathname(dentry, 0)
+		display_name = (prefix + dentry_name) if prefix else dentry_name
 
-		output_stat_info(dentry_name, dentry, inode)
+		output_stat_info(display_name, dentry, inode)
 
 		if inode:
 			try:
 				i_mode = inode.i_mode
-				i_type = i_mode & S_IFMT
-
 				if S_ISDIR(i_mode):
-					find_recurse(path, dentry, depth=depth+1)
+					if cross_mounts and int(dentry) in mountpoints:
+						mnt_root = mountpoints[int(dentry)]
+						new_prefix = display_name.rstrip("/")
+						find_recurse(path, mnt_root, depth=depth+1, prefix=new_prefix, visited=visited)
+					else:
+						find_recurse(path, dentry, depth=depth+1, prefix=prefix, visited=visited)
 			except:
 				pass
 
@@ -1479,7 +1518,12 @@ def find_recurse_begin(path="/", addr=0):
 
 	output_stat_info(path, dentry, dentry.d_inode)
 	if recurse:
-		find_recurse(path, dentry)
+		if cross_mounts and int(dentry) in mountpoints:
+			mnt_root = mountpoints[int(dentry)]
+			new_prefix = "" if dentry_name == "/" else dentry_name.rstrip("/")
+			find_recurse(path, mnt_root, prefix=new_prefix)
+		else:
+			find_recurse(path, dentry)
 
 
 def get_root_dentry():
@@ -1513,6 +1557,7 @@ if __name__ == "__main__":
 	parser.add_argument("--norecurse", '-d', dest = 'norecurse', default = False, action = "store_true", help = "only show info for listed dentries")
 	parser.add_argument("--maxcount", dest = 'maxcount', type=int, default = _MAXEL, help = "set a maximum number of directory entries per directory")
 	parser.add_argument("--maxtotal", dest = 'maxtotal', type=int, default = _MAXTOTAL, help = "set a maximum total number of directory entries")
+	parser.add_argument("--xdev", '-x', dest = 'xdev', default = False, action = "store_true", help = "do not descend directories on other filesystems")
 	parser.add_argument('addrs', metavar = 'DENTRY', nargs = '*', help = "dentry address(es) to search")
 
 	opts = parser.parse_args()
@@ -1527,6 +1572,9 @@ if __name__ == "__main__":
 	maxtotal = opts.maxtotal
 	if opts.norecurse:
 		recurse = False
+	cross_mounts = not opts.xdev
+	if cross_mounts:
+		mountpoints = get_mountpoints()
 
 	for addr_str in opts.addrs:
 		try:
