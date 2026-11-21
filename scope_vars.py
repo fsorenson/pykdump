@@ -53,7 +53,7 @@ def addr_func(addr):
 
 	print("called addr_func for '{}' - fn_str is '{}'".format(addr, fn_str))
 
-	m = re.match("^([a-zA-Z_][0-9a-zA-Z_]*)(\.[^ ]+)?(|\+((0x)?[0-9a-zA-Z]+))$", fn_str)
+	m = re.match(r"^([a-zA-Z_][0-9a-zA-Z_]*)(\.[^ ]+)?(|\+((0x)?[0-9a-zA-Z]+))$", fn_str)
 #	__fscache_disable_cookie.cold.26+0x2a
 #	... .constprop
 
@@ -84,7 +84,7 @@ def func_addr(func):
 		print("unable to find address for '{}'".format(func))
 		return 0
 
-	m = re.match("^(\$[0-9]+)? = {(?P<prototype>.+?)} (?P<addr>0x[0-9a-fA-F]+) <(?P<loc_str>[^>]+)>$", result)
+	m = re.match(r"^(\$[0-9]+)? = {(?P<prototype>.+?)} (?P<addr>0x[0-9a-fA-F]+) <(?P<loc_str>[^>]+)>$", result)
 
 	if m:
 		addr = get_arg_value(m.groups('addr'))
@@ -127,12 +127,197 @@ multiloc_range_re_str = "Range (?P<range_start>0x[0-9a-fA-F]+)-(?P<range_end>0x[
 	r"(" + multiloc_range_complex_re_str + r"|" + multiloc_register_re_str + r")"
 
 
-def decode_complex(complex_expr):
-#	print("how do we decode this?\n{}".format(complex_expr))
+def format_reg_offset(base, offset):
+	if offset == 0:
+		return base
+	if offset > 0:
+		return "{} + {}".format(base, offset)
+	return "{} - {}".format(base, -offset)
+
+
+def eval_dwarf_expr(complex_expr, regs=None, read_mem=None):
+	lines = [l for l in complex_expr.splitlines() if l.strip()]
+	if not lines:
+		return ""
+
+	stack = []
+	is_value = False
+	pieces = []
+
+	binops = {
+		"DW_OP_and": "&",
+		"DW_OP_or": "|",
+		"DW_OP_xor": "^",
+		"DW_OP_plus": "+",
+		"DW_OP_minus": "-",
+		"DW_OP_mul": "*",
+		"DW_OP_div": "/",
+		"DW_OP_mod": "%",
+		"DW_OP_shl": "<<",
+		"DW_OP_shr": ">>",
+		"DW_OP_shra": ">>",
+	}
+
+	i = 0
+	while i < len(lines):
+		m = re.match(r"^\s*\d+:\s+(DW_OP_\S+)(?:\s+(.*))?$", lines[i])
+		if not m:
+			return None
+		op = m.group(1)
+		rest = (m.group(2) or "").strip()
+
+		if op == "DW_OP_fbreg":
+			off = int(rest, 0)
+			if regs is not None and "fbreg" in regs:
+				stack.append(regs["fbreg"] + off)
+			else:
+				stack.append(format_reg_offset("fbreg", off))
+		elif re.match(r"^DW_OP_breg(\d+|x)$", op):
+			bm = re.match(r"^(?:(\d+)\s+)?(-?\d+|0x[0-9a-fA-F]+)(?:\s+\[(\$[^\]]+)\])?$", rest)
+			if not bm:
+				return None
+			off = int(bm.group(2), 0)
+			reg = bm.group(3) or "$reg{}".format(bm.group(1) or op[10:])
+			if regs is not None and reg in regs:
+				stack.append(regs[reg] + off)
+			else:
+				stack.append(format_reg_offset(reg, off))
+		elif re.match(r"^DW_OP_reg(\d+|x)$", op):
+			rm = re.match(r"^(?:\d+\s+)?(?:\[(\$[^\]]+)\])?$", rest)
+			reg = (rm.group(1) if rm and rm.group(1) else None) or "$reg{}".format(op[9:])
+			if regs is not None and reg in regs:
+				stack.append(regs[reg])
+			else:
+				stack.append(reg)
+			is_value = True
+		elif op in ("DW_OP_const1u", "DW_OP_const1s", "DW_OP_const2u", "DW_OP_const2s",
+					"DW_OP_const4u", "DW_OP_const4s", "DW_OP_const8u", "DW_OP_const8s",
+					"DW_OP_constu", "DW_OP_consts", "DW_OP_addr"):
+			val = int(rest, 0)
+			stack.append(val)
+		elif op.startswith("DW_OP_lit"):
+			stack.append(int(op[9:]))
+		elif op == "DW_OP_plus_uconst":
+			if not stack:
+				return None
+			off = int(rest, 0)
+			top = stack.pop()
+			if isinstance(top, int):
+				stack.append(top + off)
+			else:
+				stack.append(format_reg_offset("({})".format(top) if " " in str(top) else str(top), off))
+		elif op == "DW_OP_deref" or op == "DW_OP_deref_size":
+			if not stack:
+				return None
+			size = int(rest, 0) if op == "DW_OP_deref_size" else 8
+			addr = stack.pop()
+			if isinstance(addr, int) and read_mem is not None:
+				stack.append(read_mem(addr, size))
+			else:
+				ctype = {1: "uint8_t", 2: "uint16_t", 4: "uint32_t", 8: "uintptr_t"}.get(size, "uint{}_t".format(size * 8))
+				addr_s = "0x{:x}".format(addr) if isinstance(addr, int) else str(addr)
+				stack.append("*({} *)({})".format(ctype, addr_s))
+		elif op in binops:
+			if len(stack) < 2:
+				return None
+			rhs = stack.pop()
+			lhs = stack.pop()
+			if isinstance(lhs, int) and isinstance(rhs, int):
+				if op == "DW_OP_and": stack.append(lhs & rhs)
+				elif op == "DW_OP_or": stack.append(lhs | rhs)
+				elif op == "DW_OP_xor": stack.append(lhs ^ rhs)
+				elif op == "DW_OP_plus": stack.append(lhs + rhs)
+				elif op == "DW_OP_minus": stack.append(lhs - rhs)
+				elif op == "DW_OP_mul": stack.append(lhs * rhs)
+				elif op == "DW_OP_div" and rhs != 0: stack.append(lhs // rhs)
+				elif op == "DW_OP_mod" and rhs != 0: stack.append(lhs % rhs)
+				elif op == "DW_OP_shl": stack.append(lhs << rhs)
+				elif op in ("DW_OP_shr", "DW_OP_shra"): stack.append(lhs >> rhs)
+				else: return None
+			else:
+				lhs_s = "0x{:x}".format(lhs) if isinstance(lhs, int) else str(lhs)
+				rhs_s = str(rhs)
+				stack.append("({} {} {})".format(lhs_s, binops[op], rhs_s))
+		elif op == "DW_OP_neg":
+			if not stack:
+				return None
+			val = stack.pop()
+			stack.append(-val if isinstance(val, int) else "-({})".format(val))
+		elif op == "DW_OP_not":
+			if not stack:
+				return None
+			val = stack.pop()
+			stack.append(~val if isinstance(val, int) else "~({})".format(val))
+		elif op == "DW_OP_stack_value":
+			is_value = True
+		elif op == "DW_OP_entry_value":
+			# Consume indented sub-expression lines following DW_OP_entry_value
+			sub_indent = len(lines[i]) - len(lines[i].lstrip())
+			sub_lines = []
+			while i + 1 < len(lines) and (len(lines[i + 1]) - len(lines[i + 1].lstrip())) > sub_indent:
+				i += 1
+				sub_lines.append(lines[i])
+			sub_res = eval_dwarf_expr("\n".join(sub_lines))
+			stack.append("entry({})".format(sub_res if sub_res else "..."))
+		elif op == "DW_OP_piece":
+			size = int(rest, 0)
+			if stack:
+				val = stack.pop()
+				prefix = "val=" if is_value else "addr="
+				val_s = "0x{:x}".format(val) if isinstance(val, int) else str(val)
+				pieces.append("{}B@{}{}".format(size, prefix, val_s))
+			else:
+				pieces.append("{}B@undef".format(size))
+			is_value = False
+		elif op == "DW_OP_nop":
+			pass
+		else:
+			return None
+		i += 1
+
+	if pieces:
+		return "pieces: " + ", ".join(pieces)
+	if not stack:
+		return None
+	top = stack[-1]
+	if isinstance(top, int):
+		return "value: {} (0x{:x})".format(top, top & 0xffffffffffffffff) if is_value else "at 0x{:016x}".format(top)
+	return ("value: " if is_value else "at ") + str(top)
+
+
+def decode_complex(complex_expr, regs=None, read_mem=None):
+	decoded = eval_dwarf_expr(complex_expr, regs=regs, read_mem=read_mem)
+	if decoded is not None:
+		return decoded
 	return indent_string(complex_expr)
 
 
-def get_text_addr_vars(func, text_addr):
+def read_mem_int(addr, size):
+	data = readmem(addr, size)
+	return int.from_bytes(data, "little")
+
+
+def parse_bt_frames(pid):
+	frames = []
+	out = exec_crash_command("bt {}".format(pid))
+	for line in out.splitlines():
+		fm = re.match(r"^\s*#(\d+)\s+\[([0-9a-fA-F]+)\]\s+(\S+)\s+at\s+([0-9a-fA-F]+)", line)
+		if fm:
+			sp = int(fm.group(2), 16)
+			frames.append({
+				"num": int(fm.group(1)),
+				"sp": sp,
+				"rsp": sp + 8 if int(fm.group(1)) > 0 else sp,
+				"func": fm.group(3),
+				"addr": int(fm.group(4), 16),
+				"fbreg": None,
+			})
+	for i in range(len(frames) - 1):
+		frames[i]["fbreg"] = frames[i + 1]["sp"] + 8
+	return frames
+
+
+def get_text_addr_vars(func, text_addr, regs=None, read_mem=None):
 	indent_str = "\t"
 	indent_str2 = "\t\t"
 	print("")
@@ -142,7 +327,7 @@ def get_text_addr_vars(func, text_addr):
 
 	r = exec_crash_command("gdb info scope *0x{:016x}".format(text_addr))
 
-	m = re.match("^Scope for (\*0x[0-9a-fA-f]+):$[\n\r]+(.+)$", r, flags=re.MULTILINE + re.DOTALL)
+	m = re.match(r"^Scope for (\*0x[0-9a-fA-F]+):$[\n\r]+(.+)$", r, flags=re.MULTILINE | re.DOTALL)
 	if not m:
 		print("{}Unable to match".format(indent_str2))
 		return
@@ -171,7 +356,7 @@ def get_text_addr_vars(func, text_addr):
 #						print("\tin register {}".format(range_match.group('register_name')))
 						locations.append("in register {}".format(range_match.group('register_name')))
 					else:
-						d = decode_complex(range_match.group('dwarf_expr'))
+						d = decode_complex(range_match.group('dwarf_expr'), regs=regs, read_mem=read_mem)
 						locations.append(d)
 			if len(locations) == 0:
 				print("{}{} - len {}: not in scope".format(indent_str, current_sym, match.group('multiloc_len')))
@@ -183,7 +368,7 @@ def get_text_addr_vars(func, text_addr):
 					print("{}* {}".format(indent_str2, loc))
 
 		elif match.group('is_complex'):
-			d = decode_complex(match.group('complex_content'))
+			d = decode_complex(match.group('complex_content'), regs=regs, read_mem=read_mem)
 			print("{}{} - len {}: {}".format(indent_str, current_sym, match.group('complex_len'), d))
 		elif match.group('is_label'):
 			print("{}{} - len {}: label at {}".format(indent_str, current_sym, match.group('label_len'), match.group('label_addr')))
@@ -223,9 +408,9 @@ def print_full_func_info(func):
 # eventually want to pass the pid so we can go the whole way
 # for now, just get what's in scope
 #def get_scope(pid, addr):
-def get_scope(func, addr):
+def get_scope(func, addr, regs=None, read_mem=None):
 #	print("func: {}".format(func))
-	get_text_addr_vars(func, addr)
+	get_text_addr_vars(func, addr, regs=regs, read_mem=read_mem)
 
 
 # -p <pid>
@@ -237,16 +422,30 @@ if __name__ == "__main__":
 	try:
 #		opts_parser = argparse.ArgumentParser(version='0.01')
 		opts_parser = argparse.ArgumentParser()
-		opts_parser.add_argument('addrs', metavar='N', type=str, nargs='+',
+		opts_parser.add_argument('addrs', metavar='N', type=str, nargs='*',
 			help='addresses for which to display scope')
+		opts_parser.add_argument('--pid', '-p', dest='pid', type=int, default=0,
+			help='resolve frame base/stack addresses using backtrace of PID')
 		opts_parser.add_argument('--return', '-r', dest='return_addr', default=False, action='store_true',
 			help='the address(es) is a return address, so get scope of previous instrution')
 
 		args = opts_parser.parse_args()
 
-		if len(args.addrs) < 1:
-			print("usage: scope_vars [--return | -r] <address> [<address> ... ]")
+		if len(args.addrs) < 1 and not args.pid:
+			opts_parser.print_help()
 			sys.exit(1)
+
+		frames = parse_bt_frames(args.pid) if args.pid else []
+		read_mem = read_mem_int if args.pid else None
+
+		if args.pid and not args.addrs:
+			for f in frames:
+				check_addr = f["addr"] if f["num"] == 0 else previous_insn_addr(f["addr"])
+				if not check_addr:
+					continue
+				regs = {"fbreg": f["fbreg"], "$rsp": f["rsp"]} if f["fbreg"] else None
+				get_scope(f["func"], check_addr, regs=regs, read_mem=read_mem)
+			sys.exit(0)
 
 		for req_addr_str in args.addrs:
 			req_addr = get_arg_value(req_addr_str)
@@ -271,8 +470,15 @@ if __name__ == "__main__":
 						check_addr = 0
 #				else:
 #					print("Unable to determine address of previous instruction to 0x{:016x}".format(req_addr))
+			regs = None
+			if frames:
+				for f in frames:
+					if f["addr"] == req_addr or f["addr"] == check_addr or f["func"] == req_func:
+						if f["fbreg"]:
+							regs = {"fbreg": f["fbreg"], "$rsp": f["rsp"]}
+						break
 			if check_addr:
-				get_scope(req_func, check_addr)
+				get_scope(req_func, check_addr, regs=regs, read_mem=read_mem)
 
 	except crash.error as e:
 		print("failed: '{}'".format(sys.argv))
