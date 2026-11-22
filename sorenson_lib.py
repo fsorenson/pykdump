@@ -206,4 +206,27 @@ def call_foreach_args(func, args):
 		if addr != 0:
 			func(addr)
 
+if struct__has_member("file", "f_path"):
+	def file_get_dentry(filp):
+		try:
+			return Deref(filp.f_path.dentry)
+		except:
+			return 0
+	def file_get_vfsmnt(filp):
+		try:
+			return Deref(filp.f_path.mnt)
+		except:
+			return 0
+else:
+	def file_get_dentry(filp):
+		try:
+			return Deref(filp.f_dentry)
+		except:
+			return 0
+	def file_get_vfsmnt(filp):
+		try:
+			return Deref(filp.f_vfsmnt)
+		except:
+			return 0
+
 # vim: sw=4 ts=4 noexpandtab
