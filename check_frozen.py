@@ -29,8 +29,6 @@ def get_time_ms_pretty(t):
 
 def task_get_last_arrival_pretty(pid):
 	tt = TaskTable()
-#	pp.pprint(tt)
-#	return
 	if (pid > INT_MAX):
 		t = readSU("struct task_struct", pid)
 		if (not tt.getByTid(t.pid)):
@@ -40,17 +38,12 @@ def task_get_last_arrival_pretty(pid):
 	else:
 		t = tt.getByTid(pid)
 	if (t):
-#		lr = t.Last_ran
-#		basems = tt.basems
-#		basems = jiffies
 		ran_ago = t.Ran_ago
 
-#		delay = get_time_ms_pretty(basems - lr)
 		delay = get_time_ms_pretty(ran_ago)
 		return delay
 	else:
 		return "? ??:??:??.?????????"
-
 
 def try_something():
 	try:
@@ -59,7 +52,6 @@ def try_something():
 		print("not in scope")
 	else:
 		print("cmd_run_wait known")
-
 
 # shamelessly stolen from skywalker
 # needs to become a library function, or whatever it's called in python--
@@ -96,8 +88,6 @@ class get_per_cpu():
 		for selectedcpu in self.cpu.keys():
 			retstr = "%s\n%s%3s: %s" %(retstr, SPACER, selectedcpu, self.cpu[selectedcpu])
 		return retstr
-
-
 
 def task_last_run(task_addr):
 	last_run = 0
@@ -143,13 +133,6 @@ parser = argparse.ArgumentParser(description='Display mounts and frozen filesyst
 parser.add_argument('-d', '--debug', action="count", help='Debugging output. Add additional flags to increase verbosity.')
 parser.add_argument('-q', '--quiet', action="store_true", help='Only show frozen filesystems')
 args = parser.parse_args()
-
-#percpu = get_per_cpu()
-
-#pp.pprint(vars(percpu))
-
-#try_something()
-
 
 def get_dentry_name(dentry):
     namelen = dentry.d_name.len
