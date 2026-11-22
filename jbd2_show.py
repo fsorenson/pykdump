@@ -51,6 +51,18 @@ T_STATE_NAMES = {
     8: "T_FINISHED",
 }
 
+T_STATE_EXPLAIN = {
+    0: "accepting new handles (normal active transaction)",
+    1: "locked against new handles; waiting for active t_updates handles to finish",
+    2: "switching transaction state",
+    3: "flushing ordered-mode file data to disk before journal commit",
+    4: "writing transaction metadata blocks to the journal",
+    5: "flushing data device write cache (REQ_PREFLUSH) before commit record",
+    6: "writing/flushing journal commit block & metadata to the journal device",
+    7: "running post-commit callbacks",
+    8: "finished commit; awaiting checkpointing",
+}
+
 # buffer_head b_state bits (include/linux/buffer_head.h)
 BH_UPTODATE = 0
 BH_DIRTY = 1
@@ -233,6 +245,107 @@ def print_waiters(j):
         print("  waitqs: no blocked tasks")
 
 
+def tx_age_sec(tx, now_ns, jiffies_val):
+    if not tx:
+        return None
+    try:
+        st_ns = int(tx.t_start_time)
+        if st_ns and now_ns and now_ns > st_ns:
+            return (now_ns - st_ns) / 1e9
+    except Exception:
+        pass
+    try:
+        hz = int(sys_info.HZ) if hasattr(sys_info, "HZ") else 1000
+        return ((jiffies_val - int(tx.t_start)) & 0xffffffff) / float(hz)
+    except Exception:
+        return None
+
+
+def diagnose_journal(j, sbi, jdev, cp_count, now_ns, jiffies_val):
+    """Produce human-readable interpretation of the journal's current state."""
+    notes = []
+    j_flags = int(j.j_flags)
+    j_errno = int(j.j_errno)
+    barrier = int(j.j_barrier_count)
+
+    if (j_flags & (1 << 1)) or j_errno:
+        notes.append(
+            "ABORTED: Journal has aborted (j_errno={}); filesystem is read-only or failing writes.".format(j_errno)
+        )
+    if barrier > 0:
+        notes.append(
+            "FROZEN: j_barrier_count={} (filesystem freeze or barrier active); new transactions will block.".format(barrier)
+        )
+
+    total = int(j.j_total_len)
+    free = int(j.j_free)
+    if total > 0 and free * 4 < total:
+        notes.append(
+            "LOW JOURNAL SPACE: Only {}/{} blocks free ({:.0f}%); checkpointing of {} older tx(s) may be lagging.".format(
+                free, total, (100.0 * free) / total, cp_count
+            )
+        )
+
+    committing = j.j_committing_transaction
+    if committing:
+        t_state_off = member_offset("struct transaction_s", "t_state")
+        t_state = readU32(int(committing) + t_state_off) if t_state_off >= 0 else -1
+        state_name = T_STATE_NAMES.get(t_state, str(t_state))
+        explain = T_STATE_EXPLAIN.get(t_state, "in commit")
+        age = tx_age_sec(committing, now_ns, jiffies_val)
+        age_s = "{:.1f}s".format(age) if age is not None else "unknown age"
+        updates = int(committing.t_updates.counter)
+
+        if t_state == 1 and updates > 0:
+            notes.append(
+                "STALLED COMMIT ({}, {}): Waiting for {} active handle(s) (t_updates) to close; "
+                "find which task is holding a jbd2 handle.".format(state_name, age_s, updates)
+            )
+        elif age is not None and age >= 5.0:
+            jpid = int(j.j_task.pid) if j.j_task else 0
+            notes.append(
+                "STALLED COMMIT (tid={}, {}, {}): kjournald2 (PID {}) is {}.".format(
+                    int(committing.t_tid), state_name, age_s, jpid, explain
+                )
+            )
+            if t_state in (3, 4, 5, 6):
+                notes.append(
+                    "LIKELY I/O BOTTLENECK: Check 'bt {}' and in-flight block I/O on {} (e.g. loop/dm/disk queue).".format(
+                        jpid, jdev
+                    )
+                )
+        else:
+            notes.append("COMMITTING (tid={}, {}, {}): {}.".format(int(committing.t_tid), state_name, age_s, explain))
+
+    try:
+        wq_locked = j.j_wait_transaction_locked
+        if int(wq_locked.head.next) != int(wq_locked.head):
+            notes.append(
+                "CASCADE BLOCKING: Tasks on j_wait_transaction_locked are blocked in start_this_handle() "
+                "waiting for the current commit to finish before a new transaction can proceed."
+            )
+    except Exception:
+        pass
+
+    try:
+        wq_done = j.j_wait_done_commit
+        if int(wq_done.head.next) != int(wq_done.head):
+            notes.append(
+                "FSYNC/COMMIT WAITERS: Tasks on j_wait_done_commit are waiting for tid={} commit completion.".format(
+                    int(j.j_commit_request)
+                )
+            )
+    except Exception:
+        pass
+
+    if not notes:
+        notes.append("HEALTHY/IDLE: No stalled commit, errors, or blocked journal waiters.")
+
+    print("  Interpretation:")
+    for n in notes:
+        print("    * {}".format(n))
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="jbd2_show",
@@ -240,6 +353,7 @@ def main():
     )
     parser.add_argument("-v", "--verbose", action="count", default=0, help="Show buffer_head lists and locked buffers")
     parser.add_argument("-m", "--mount", help="Filter by mountpoint or device substring")
+    parser.add_argument("--raw", action="store_true", help="Omit human-readable interpretation")
     parser.add_argument("--version", action="store_true", help="Show version and exit")
     args = parser.parse_args()
 
@@ -311,6 +425,7 @@ def main():
         print_transaction("committing_tx", j.j_committing_transaction, now_ns, jiffies_val, args.verbose)
 
         cp_head = j.j_checkpoint_transactions
+        cp_count = 0
         if cp_head:
             cp_list = []
             start = int(cp_head)
@@ -322,7 +437,8 @@ def main():
                 if not nxt or nxt == start:
                     break
                 cur = nxt
-            print("  checkpoint_txs: {} transaction(s)".format(len(cp_list)))
+            cp_count = len(cp_list)
+            print("  checkpoint_txs: {} transaction(s)".format(cp_count))
             if args.verbose >= 1:
                 for idx, ctx in enumerate(cp_list):
                     print_transaction("  cp[{}]".format(idx), ctx, now_ns, jiffies_val, args.verbose)
@@ -330,6 +446,8 @@ def main():
             print("  checkpoint_txs: 0")
 
         print_waiters(j)
+        if not args.raw:
+            diagnose_journal(j, sbi, jdev, cp_count, now_ns, jiffies_val)
         print()
 
 
