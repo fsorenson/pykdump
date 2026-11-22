@@ -1095,8 +1095,6 @@ def readlink_proc(dentry):
 		traceback.print_tb(sys.exc_info()[2])
 		pass
 
-
-
 	try:
 		inode = dentry.d_inode
 		pi = PROC_I(inode)
@@ -1127,7 +1125,6 @@ def readlink_proc(dentry):
 	return [ "unknown" ]
 
 def mapping_get_page(mapping, offset):
-#	print("in mapping_get_page()")
 	needed_index = offset >> 12 # PAGE_SHIFT
 
 	mapping = readSU("struct address_space", mapping)
@@ -1153,7 +1150,6 @@ def mapping_get_page(mapping, offset):
 			if l != '':
 				try:
 					page = readSU("struct page", get_arg_value(l))
-#					print("read page 0x{:016x} with index {}".format(page, page.index))
 					if page.index == needed_index:
 						return page
 				except:
@@ -1243,7 +1239,6 @@ def readlink(dentry):
 		print("error in readlink: {}".format(e))
 		pass
 
-
 	if fstype == "xfs":
 		return readlink_xfs(dentry)
 	if fstype == "sysfs":
@@ -1284,11 +1279,11 @@ def readlink(dentry):
 #		if readlink_func == "proc_pid_readlink":
 #			return readlink_proc(dentry)
 
-
-
 	return "unknown"
 
 def qstr(addr, complain=False):
+	if not qstr:
+		return ""
 	try:
 		q = readSU("struct qstr", long(addr))
 		len = q.len
@@ -1296,9 +1291,6 @@ def qstr(addr, complain=False):
 			return readmem(q.name, q.len)
 		return ""
 	except:
-		if complain:
-			print("hmm. some exception reading string")
-#		raise
 		pass
 	return ""
 
@@ -1402,15 +1394,12 @@ def get_dentry_name(dentry, complain=True):
 	name_ptr = readPtr(Addr(dentry.d_name, extra='name'))
 
 	if name_ptr == Addr(dentry, extra='d_iname'):
-#	if readPtr(Addr(dentry.d_name, extra='name')) == Addr(dentry, extra='d_iname'):
-
-		path_ele = qstr(dentry.d_name, complain)
 		try:
+			path_ele = qstr(dentry.d_name, complain)
 			return cleanup_str(str(path_ele, 'utf-8'))
 		except:
 			return "????? - cannot read 0x{:016x}".format(dentry.d_name)
 	try:
-#		name = readPtr(Addr(dentry.d_name, extra='name'))
 		path_ele = qstr(dentry.d_name, complain)
 		return cleanup_str(str(path_ele, 'utf-8'))
 	except:
