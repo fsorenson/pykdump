@@ -7,6 +7,7 @@ from LinuxDump.BTstack import exec_bt
 from pykdump.API import *
 from LinuxDump.KernLocks import (decode_mutex)
 import argparse
+import sorenson_lib
 
 debug_script = False
 
@@ -30,105 +31,7 @@ def enum_string(enum_name, val):
 		pass
 	return str
 
-
-def get_sym_addr(sym):
-	try:
-		addr = long(readSymbol(sym))
-		return addr
-	except Exception as ex:
-		return 0
-
-def addr_is_symbol(addr):
-	try:
-		sym = addr2sym(addr)
-		if sym == None:
-			return False
-		return sym
-	except:
-		return False
-
-def string_is_symbol(string):
-	try:
-		addr = sym2addr(string)
-		if addr == None:
-			return False
-		return addr
-	except:
-		return False
-
-
-def get_arg_value(arg):
-	try:
-		sym_addr = string_is_symbol(arg)
-
-#		print("sym_addr '{}' = '{}'".format(arg, sym_addr))
-		if (sym_addr) != 0:
-			return sym_addr
-
-
-		if '.' in arg:
-			return float(arg)
-		if arg.lower().startswith('0x'):
-			return int(arg, 16)
-		if arg.startswith('0') and all(c in string.octdigits for c in arg):
-			return int(arg, 8)
-#               if all(c in string.intdigits for c in arg): ### stupid python doesn't have string.intdigits?
-		if all(c in '0123456789' for c in arg):
-			return int(arg, 10)
-		return int(arg, 16)
-	except ValueError:
-		return 0
-
-def task_state_abbr(state):
-	if state is TASK_STATE.TASK_RUNNING: return "RU"
-	elif state == "TASK_RUNNING": return "RU"
-	elif state == "TASK_INTERRUPTIBLE": return "IN"
-	elif state == "TASK_UNINTERRUPTIBLE": return "UN"
-	elif state == "TASK_STOPPED": return "ST"
-	elif state == "TASK_TRACED": return "TR"
-
-	if state == "TASK_ZOMBIE": return "TZ"
-	if state == "EXIT_ZOMBIE": return "XZ"
-
-	if state == "EXIT_DEAD": return "XD"
-	if state == "TASK_DEAD": return "DE"
-
-	if state == "TASK_WAKEKILL|TASK_UNINTERRUPTIBLE": return "KU"
-
-	if state == "TASK_WAKEKILL": return "WK"
-	elif state == "TASK_WAKING": return "WA"
-	elif state == "TASK_PARKING": return "PK"
-	else:
-		return "?{}?".format(str(state))
-
-
-def pp_time_ns(ns):
-	s = int(ns / 1000000000)
-#	ns %= 1000000000
-	ns = int(ns % 1000000000)
-	m = int(s / 60)
-	s %= 60
-	h = int(m / 60)
-	m %= 60
-	d = int(h / 24)
-	h %= 24
-	return "%d %2d:%02d:%02d.%09d" % (d, h, m, s, ns)
-
-def pp_time_us(us):
-	return pp_time_ns(us * 1000)[:-3]
-
-def pp_time_ms(ms):
-	return pp_time_ns(ms * 1000 * 1000)[:-6]
-
-def pp_time_s(s):
-	return pp_time_ns(s * 1000 * 1000 * 1000)[:-10]
-
-def get_time_ms_pretty(t):
-	return pp_time_ms(t)
-
-
 def show_task_line_generic(task, this_pid=None):
-
 	try:
 		task = readSU("struct task_struct", task)
 	except:
@@ -146,7 +49,7 @@ def show_task_line_generic(task, this_pid=None):
 		return
 
 	comm = task.comm
-	state = task_state_abbr(t.state)
+	state = task_state_str(t.state)
 	lr = t.Last_ran
 	basems = tt.basems
 	delay = get_time_ms_pretty(basems - lr)
@@ -166,7 +69,7 @@ def display_autofs_waitqueue(awq):
 	print("{}(struct autofs_wait_queue *)0x{:016x} - {} token: {}".format(ind(2), awq, SmartString(awq.name.name), awq.wait_queue_token))
 	try:
 		t = tt.getByPid(awq.pid)
-		state = task_state_abbr(getTaskState(t))
+		state = task_state_str(getTaskState(t))
 #		lr = t.Last_ran
 		delay = get_time_ms_pretty(t.Ran_ago)
 		print("{}{:7d}  {:16s} {st} {time}".format(ind(3), awq.pid, t.comm, st=state, time=delay))
@@ -174,7 +77,7 @@ def display_autofs_waitqueue(awq):
 	except:
 		try:
 			t = tt.getByTid(awq.tgid)
-			state = task_state_abbr(getTaskState(t))
+			state = task_state_str(getTaskState(t))
 			delay = get_time_ms_pretty(t.Ran_ago)
 			print("{}{:7d}  {:16s} {st} {time}".format(ind(3), awq.pid, t.comm, st=state, time=delay))
 		except:
@@ -233,12 +136,6 @@ def display_autofs_sbi(sbi):
 if __name__ == "__main__":
 	tt = TaskTable()
 	opts_parser = argparse.ArgumentParser()
-#	opts_parser.add_argument('sbis', metavar='N', type=str, nargs='*',
-#			help='autofs_wait_queue addresses to display')
-#	opts_parser.add_argument('rwsems', metavar='N', type=str, nargs='*',
-#			help='rwsemaphore addresses to display')
-#	opts_parser.add_argument('--rwsems', dest='rwsems', default=[], metavar='N', type=str, nargs='*',
-#			help='rwsem addresses to display')
 	opts_parser.add_argument('--debug', '-d', dest='debug', default=[], action='store_true',
 			help='show script debugging information')
 
