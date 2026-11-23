@@ -238,7 +238,12 @@ def format_time_ns(ns):
 	m %= 60
 	d = int(h / 24)
 	h %= 24
-	return "%d %2d:%02d:%02d.%09d" % (d, h, m, s, ns)
+
+	ret = ""
+	if d:
+		ret = "{} day{} ".format(d, "s" if d > 1 else "")
+
+	return "{}{:02d}:{:02d}:{:02d}.{:09d}".format(ret, h, m, s, ns)
 
 def format_time_us(us):
 	return format_time_ns(us * 1000)[:-3]
