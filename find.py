@@ -7,6 +7,7 @@ from LinuxDump.Tasks import (TaskTable, Task)
 from LinuxDump.trees import for_all_rbtree
 import argparse
 import inspect
+import sorenson_lib
 
 __author__ = "Frank Sorenson <sorenson@redhat.com>"
 __version__ = "1.1.0"
@@ -575,31 +576,6 @@ def page_address(page_addr):
 		print("virt_address = 0x{:016x}".format(virt_address))
 	return virt_address
 
-
-def pp_time_ns(ns):
-	ret = ""
-	s = int(ns / 1000000000)
-	ns %= 1000000000
-	m = int(s / 60)
-	s %= 60
-	h = int(m / 60)
-	m %= 60
-	d = int(h / 24)
-	h %= 24
-	if d:
-		ret = "{} day{} ".format(d, "s" if d > 1 else "")
-
-	ret = "{}{:2d}:{:02d}:{:02d}.{:09d}".format(ret, h, m, s, ns)
-	return ret
-
-def pp_time_us(us):
-	return pp_time_ns(us * 1000)[:-3]
-
-def pp_time_ms(ms):
-	return pp_time_ns(ms * 1000 * 1000)[:-6]
-
-def pp_time_s(s):
-	return pp_time_ns(s * 1000 * 1000 * 1000)[:-10]
 
 def timespec_to_string(ts_in):
 	try:
