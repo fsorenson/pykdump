@@ -2,6 +2,7 @@
 
 from __future__ import print_function
 
+import argparse
 import sys, os
 
 if __name__ == "__main__":
@@ -432,20 +433,14 @@ def usb_device_dump(usbdev, bus, level, index, count):
 	usb_dump_desc(usbdev)
 
 	hdev = usbdev
-	port1 = 1
 	cnt = 0
 	try:
-#		print("hdev: 0x{:016x}".format(hdev))
-		child = usb_hub_find_child(hdev, port1)
-		while port1 <= hdev.maxchild:
-#			print("child: 0x{:016x}".format(child))
-			port1 = port1 + 1
+		for port1 in range(1, hdev.maxchild + 1):
 			child = usb_hub_find_child(hdev, port1)
 			if not child or child == None:
 				continue
-			chix = port1
 			cnt = cnt + 1
-			usb_device_dump(child, bus, level + 1, chix - 1, cnt)
+			usb_device_dump(child, bus, level + 1, port1 - 1, cnt)
 	except Exception as e:
 		print("exception in usb_device_dump: {}".format(e))
 
@@ -455,6 +450,327 @@ def usb_device_dump(usbdev, bus, level, index, count):
 #			  file_offset, childdev, bus,
 #			  level + 1, chix - 1, ++cnt);
 
+
+
+USB_IDS_PATHS = [
+	"/usr/share/hwdata/usb.ids",
+	"/usr/share/misc/usb.ids",
+]
+
+
+class UsbIdsDB(object):
+	"""Parser and lookup table for usb.ids."""
+
+	def __init__(self, path=None):
+		self.vendors = {}
+		self.products = {}
+		self.classes = {}
+		self.subclasses = {}
+		self.prots = {}
+
+		candidates = [path] if path else USB_IDS_PATHS
+		for p in candidates:
+			if p and os.path.isfile(p):
+				self._load(p)
+				break
+
+	def _load(self, path):
+		cur_vendor = None
+		cur_class = None
+		cur_sub = None
+		in_classes = False
+
+		with open(path, "r", encoding="utf-8", errors="replace") as f:
+			for raw in f:
+				line = raw.rstrip("\r\n")
+				if not line or line.startswith("#"):
+					continue
+				if line.startswith("C "):
+					in_classes = True
+					cur_vendor = None
+					parts = line[2:].strip().split(None, 1)
+					if len(parts) == 2:
+						try:
+							cur_class = int(parts[0], 16)
+							self.classes[cur_class] = parts[1]
+							cur_sub = None
+						except ValueError:
+							cur_class = None
+					continue
+
+				if in_classes:
+					if line.startswith("\t\t") and cur_class is not None and cur_sub is not None:
+						parts = line[2:].strip().split(None, 1)
+						if len(parts) == 2:
+							try:
+								self.prots[(cur_class, cur_sub, int(parts[0], 16))] = parts[1]
+							except ValueError:
+								pass
+					elif line.startswith("\t") and cur_class is not None:
+						parts = line[1:].strip().split(None, 1)
+						if len(parts) == 2:
+							try:
+								cur_sub = int(parts[0], 16)
+								self.subclasses[(cur_class, cur_sub)] = parts[1]
+							except ValueError:
+								cur_sub = None
+					elif not line.startswith("\t"):
+						in_classes = False
+					else:
+						continue
+
+				if not in_classes:
+					if line.startswith("\t") and not line.startswith("\t\t") and cur_vendor is not None:
+						parts = line[1:].strip().split(None, 1)
+						if len(parts) == 2:
+							try:
+								self.products[(cur_vendor, int(parts[0], 16))] = parts[1]
+							except ValueError:
+								pass
+					elif not line.startswith("\t"):
+						parts = line.strip().split(None, 1)
+						if len(parts) == 2:
+							try:
+								cur_vendor = int(parts[0], 16)
+								self.vendors[cur_vendor] = parts[1]
+							except ValueError:
+								cur_vendor = None
+
+	def vendor_name(self, vid, fallback=""):
+		return self.vendors.get(vid, fallback or "")
+
+	def product_name(self, vid, pid, fallback=""):
+		return self.products.get((vid, pid), fallback or "")
+
+	def class_name(self, cls):
+		return self.classes.get(cls, "[unknown]")
+
+	def subclass_name(self, cls, sub):
+		return self.subclasses.get((cls, sub), "[unknown]")
+
+	def prot_name(self, cls, sub, prot):
+		return self.prots.get((cls, sub, prot), "")
+
+
+def get_usb_buses():
+	usb_bus_idr = readSymbol("usb_bus_idr")
+	buses = []
+	for _id, val in idr_for_each(usb_bus_idr):
+		buses.append(readSU("struct usb_bus", val))
+	buses.sort(key=lambda b: int(b.busnum))
+	return buses
+
+
+def collect_bus_devices(usbdev, bus, level=0, port=1, out=None):
+	if out is None:
+		out = []
+	out.append((bus, usbdev, level, port))
+	for port1 in range(1, int(usbdev.maxchild) + 1):
+		child = usb_hub_find_child(usbdev, port1)
+		if child:
+			collect_bus_devices(child, bus, level + 1, port1, out)
+	return out
+
+
+def format_bcd(bcd):
+	val = int(bcd)
+	return "{:x}.{:02x}".format((val >> 8) & 0xff, val & 0xff)
+
+
+def speed_mbps_str(speed):
+	if speed == s_usb_device_speed['USB_SPEED_LOW']:
+		return "1.5M"
+	if speed in (s_usb_device_speed['USB_SPEED_UNKNOWN'], s_usb_device_speed['USB_SPEED_FULL']):
+		return "12M"
+	if speed in (s_usb_device_speed['USB_SPEED_WIRELESS'], s_usb_device_speed['USB_SPEED_HIGH']):
+		return "480M"
+	if speed == s_usb_device_speed['USB_SPEED_SUPER']:
+		return "5000M"
+	if speed == s_usb_device_speed['USB_SPEED_SUPER_PLUS']:
+		return "10000M"
+	return "?M"
+
+
+def device_id_label(usbdev, db):
+	desc = usbdev.descriptor
+	vid = int(desc.idVendor)
+	pid = int(desc.idProduct)
+	vname = db.vendor_name(vid, str(usbdev.manufacturer) if usbdev.manufacturer else "")
+	pname = db.product_name(vid, pid, str(usbdev.product) if usbdev.product else "")
+	label = "{:04x}:{:04x}".format(vid, pid)
+	if vname:
+		label += " " + vname
+	if pname:
+		label += " " + pname
+	return label
+
+
+def do_lsusb_default(buses, db):
+	for bus in buses:
+		devs = collect_bus_devices(bus.root_hub, bus)
+		for b, dev, _, _ in sorted(devs, key=lambda x: int(x[1].devnum)):
+			print("Bus {:03d} Device {:03d}: ID {}".format(
+				int(b.busnum), int(dev.devnum), device_id_label(dev, db)
+			))
+
+
+def do_lsusb_tree(buses, db, verbose=False):
+	def render_node(bus, dev, level, port):
+		indent = "    " * level
+		spd = speed_mbps_str(int(dev.speed))
+		if level == 0:
+			drv = ""
+			try:
+				if bus.controller and bus.controller.driver:
+					drv = str(bus.controller.driver.name)
+			except Exception:
+				pass
+			if not drv:
+				drv = "usb"
+			print("/:  Bus {:03d}.Port 001: Dev {:03d}, Class=root_hub, Driver={}/{}p, {}".format(
+				int(bus.busnum), int(dev.devnum), drv, int(dev.maxchild), spd
+			))
+			if verbose:
+				print("    ID {}".format(device_id_label(dev, db)))
+		else:
+			cfg = dev.actconfig
+			if cfg and int(cfg.desc.bNumInterfaces) > 0:
+				for i in range(int(cfg.desc.bNumInterfaces)):
+					iface = cfg.interface[i]
+					idesc = iface.cur_altsetting.desc
+					cls_str = db.class_name(int(idesc.bInterfaceClass))
+					drv = str(iface.dev.driver.name) if iface.dev.driver else "(none)"
+					print("{}|__ Port {:03d}: Dev {:03d}, If {:d}, Class={}, Driver={}, {}".format(
+						indent, port, int(dev.devnum), int(idesc.bInterfaceNumber), cls_str, drv, spd
+					))
+			else:
+				cls_str = db.class_name(int(dev.descriptor.bDeviceClass))
+				print("{}|__ Port {:03d}: Dev {:03d}, If 0, Class={}, Driver=(none), {}".format(
+					indent, port, int(dev.devnum), cls_str, spd
+				))
+			if verbose:
+				print("{}    ID {}".format(indent, device_id_label(dev, db)))
+
+		for port1 in range(1, int(dev.maxchild) + 1):
+			child = usb_hub_find_child(dev, port1)
+			if child:
+				render_node(bus, child, level + 1, port1)
+
+	for bus in buses:
+		render_node(bus, bus.root_hub, 0, 1)
+
+
+def do_lsusb_verbose(buses, db):
+	xfer_types = {0: "Control", 1: "Isochronous", 2: "Bulk", 3: "Interrupt"}
+	sync_types = {0: "None", 1: "Asynchronous", 2: "Adaptive", 3: "Synchronous"}
+	usage_types = {0: "Data", 1: "Feedback", 2: "Implicit Feedback Data", 3: "Reserved"}
+
+	for bus in buses:
+		devs = collect_bus_devices(bus.root_hub, bus)
+		for b, dev, _, _ in sorted(devs, key=lambda x: int(x[1].devnum)):
+			d = dev.descriptor
+			vid = int(d.idVendor)
+			pid = int(d.idProduct)
+			bcls = int(d.bDeviceClass)
+			bsub = int(d.bDeviceSubClass)
+			bprot = int(d.bDeviceProtocol)
+			mfg = str(dev.manufacturer) if dev.manufacturer else ""
+			prod = str(dev.product) if dev.product else ""
+			ser = str(dev.serial) if dev.serial else ""
+
+			print("\nBus {:03d} Device {:03d}: ID {}".format(
+				int(b.busnum), int(dev.devnum), device_id_label(dev, db)
+			))
+			print("Device Descriptor:")
+			print("  bLength                {:d}".format(int(d.bLength)))
+			print("  bDescriptorType         {:d}".format(int(d.bDescriptorType)))
+			print("  bcdUSB               {}".format(format_bcd(d.bcdUSB)))
+			print("  bDeviceClass            {:d} {}".format(bcls, db.class_name(bcls)))
+			print("  bDeviceSubClass         {:d} {}".format(bsub, db.subclass_name(bcls, bsub)))
+			print("  bDeviceProtocol         {:d} {}".format(bprot, db.prot_name(bcls, bsub, bprot)))
+			print("  bMaxPacketSize0        {:d}".format(int(d.bMaxPacketSize0)))
+			print("  idVendor           0x{:04x} {}".format(vid, db.vendor_name(vid, mfg)))
+			print("  idProduct          0x{:04x} {}".format(pid, db.product_name(vid, pid, prod)))
+			print("  bcdDevice            {}".format(format_bcd(d.bcdDevice)))
+			print("  iManufacturer           {:d} {}".format(int(d.iManufacturer), mfg))
+			print("  iProduct                {:d} {}".format(int(d.iProduct), prod))
+			print("  iSerial                 {:d} {}".format(int(d.iSerialNumber), ser))
+			print("  bNumConfigurations      {:d}".format(int(d.bNumConfigurations)))
+
+			for ci in range(int(d.bNumConfigurations)):
+				cfg = dev.config + ci
+				cd = cfg.desc
+				bm = int(cd.bmAttributes)
+				print("  Configuration Descriptor:")
+				print("    bLength                 {:d}".format(int(cd.bLength)))
+				print("    bDescriptorType         {:d}".format(int(cd.bDescriptorType)))
+				print("    wTotalLength       0x{:04x}".format(int(cd.wTotalLength)))
+				print("    bNumInterfaces          {:d}".format(int(cd.bNumInterfaces)))
+				print("    bConfigurationValue     {:d}".format(int(cd.bConfigurationValue)))
+				print("    iConfiguration          {:d} {}".format(int(cd.iConfiguration), str(cfg.string) if cfg.string else ""))
+				print("    bmAttributes         0x{:02x}".format(bm))
+				if bm & 0x40:
+					print("      Self Powered")
+				else:
+					print("      (Bus Powered)")
+				if bm & 0x20:
+					print("      Remote Wakeup")
+				pwr_mult = 8 if int(dev.speed) >= s_usb_device_speed['USB_SPEED_SUPER'] else 2
+				print("    MaxPower              {:3d}mA".format(int(cd.bMaxPower) * pwr_mult))
+
+				for ii in range(int(cd.bNumInterfaces)):
+					intfc = cfg.intf_cache[ii]
+					for ai in range(int(intfc.num_altsetting)):
+						alt = intfc.altsetting[ai]
+						idsc = alt.desc
+						icls = int(idsc.bInterfaceClass)
+						isub = int(idsc.bInterfaceSubClass)
+						iprot = int(idsc.bInterfaceProtocol)
+						print("    Interface Descriptor:")
+						print("      bLength                 {:d}".format(int(idsc.bLength)))
+						print("      bDescriptorType         {:d}".format(int(idsc.bDescriptorType)))
+						print("      bInterfaceNumber        {:d}".format(int(idsc.bInterfaceNumber)))
+						print("      bAlternateSetting       {:d}".format(int(idsc.bAlternateSetting)))
+						print("      bNumEndpoints           {:d}".format(int(idsc.bNumEndpoints)))
+						print("      bInterfaceClass         {:d} {}".format(icls, db.class_name(icls)))
+						print("      bInterfaceSubClass      {:d} {}".format(isub, db.subclass_name(icls, isub)))
+						print("      bInterfaceProtocol      {:d} {}".format(iprot, db.prot_name(icls, isub, iprot)))
+						print("      iInterface              {:d} {}".format(int(idsc.iInterface), str(alt.string) if alt.string else ""))
+
+						for ei in range(int(idsc.bNumEndpoints)):
+							ed = alt.endpoint[ei].desc
+							ep_addr = int(ed.bEndpointAddress)
+							ep_bm = int(ed.bmAttributes)
+							maxp = int(ed.wMaxPacketSize)
+							print("      Endpoint Descriptor:")
+							print("        bLength                 {:d}".format(int(ed.bLength)))
+							print("        bDescriptorType         {:d}".format(int(ed.bDescriptorType)))
+							print("        bEndpointAddress     0x{:02x}  EP {:d} {}".format(
+								ep_addr, ep_addr & 0x0f, "IN" if (ep_addr & 0x80) else "OUT"
+							))
+							print("        bmAttributes            {:d}".format(ep_bm))
+							print("          Transfer Type            {}".format(xfer_types.get(ep_bm & 0x03, "?")))
+							print("          Synch Type               {}".format(sync_types.get((ep_bm >> 2) & 0x03, "?")))
+							print("          Usage Type               {}".format(usage_types.get((ep_bm >> 4) & 0x03, "?")))
+							print("        wMaxPacketSize     0x{:04x}  {:d}x {:d} bytes".format(
+								maxp, ((maxp >> 11) & 0x03) + 1, maxp & 0x07ff
+							))
+							print("        bInterval              {:2d}".format(int(ed.bInterval)))
+
+			if bcls == 9 and dev.maxchild:
+				try:
+					hub = usb_hub_to_struct_hub(dev)
+					if hub and hub.descriptor:
+						hd = hub.descriptor
+						print("Hub Descriptor:")
+						print("  bLength              {:2d}".format(int(hd.bDescLength)))
+						print("  bDescriptorType      {:2d}".format(int(hd.bDescriptorType)))
+						print("  nNbrPorts            {:2d}".format(int(hd.bNbrPorts)))
+						print("  wHubCharacteristic 0x{:04x}".format(int(hd.wHubCharacteristics)))
+						print("  bPwrOn2PwrGood       {:2d} * 2 milli seconds".format(int(hd.bPwrOn2PwrGood)))
+						print("  bHubContrCurrent     {:2d} milli Ampere".format(int(hd.bHubContrCurrent)))
+				except Exception:
+					pass
 
 
 # this is really more like the 'usb-devices' program
@@ -486,6 +802,26 @@ def do_display_usb_buses():
 
 
 if __name__ == "__main__":
-	do_display_usb_buses()
+	parser = argparse.ArgumentParser(
+		prog="lsusb",
+		description="Display USB buses and devices from a Linux vmcore (lsusb / usb-devices).",
+	)
+	parser.add_argument("-t", "--tree", action="store_true", help="Dump the physical USB device hierarchy as a tree")
+	parser.add_argument("-v", "--verbose", action="store_true", help="Increase verbosity (show descriptors or tree IDs)")
+	parser.add_argument("-U", "--usb-devices", action="store_true", help="Use usb-devices output format")
+	parser.add_argument("-i", dest="ids_file", help="Use specified usb.ids file")
+	args = parser.parse_args()
+
+	if args.usb_devices:
+		do_display_usb_buses()
+	else:
+		db = UsbIdsDB(args.ids_file)
+		buses = get_usb_buses()
+		if args.tree:
+			do_lsusb_tree(buses, db, verbose=args.verbose)
+		elif args.verbose:
+			do_lsusb_verbose(buses, db)
+		else:
+			do_lsusb_default(buses, db)
 
 # vim: sw=4 ts=4 noexpandtab
