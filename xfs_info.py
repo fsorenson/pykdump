@@ -1539,7 +1539,10 @@ def show_xfs_mount(addr, ilvl=0):
 
 	show_xfs_info(addr, ilvl=ilvl+1)
 
-	show_xlog(mp.xlog, ilvl=ilvl+1)
+	if mp.hasField("xlog"):
+		show_xlog(mp.xlog, ilvl=ilvl+1)
+	elif mp.hasField("m_log"):
+		show_xlog(mp.m_log, ilvl=ilvl+1)
 
 	xfsstats = mp.m_stats.xs_stats
 	show_xfsstats(xfsstats, ilvl=ilvl+1)
