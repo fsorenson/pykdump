@@ -22,7 +22,6 @@ def ind(i):
 
 def enum_string(enum_name, val):
 	str = "UNKNOWN"
-	_enum_mapping = {}
 	try:
 		_S_enum_info = EnumInfo("enum " + enum_name)
 		if _S_enum_info is None:
@@ -32,77 +31,6 @@ def enum_string(enum_name, val):
 	except Exception as ex:
 		pass
 	return str
-
-
-def get_sym_addr(sym):
-	try:
-		addr = long(readSymbol(sym))
-		return addr
-	except Exception as ex:
-		return 0
-
-def addr_is_symbol(addr):
-	try:
-		sym = addr2sym(addr)
-		if sym == None:
-			return False
-		return sym
-	except:
-		return False
-
-def string_is_symbol(string):
-	try:
-		addr = sym2addr(string)
-		if addr == None:
-			return False
-		return addr
-	except:
-		return False
-
-
-def get_arg_value(arg):
-	try:
-		sym_addr = string_is_symbol(arg)
-
-#		print("sym_addr '{}' = '{}'".format(arg, sym_addr))
-		if (sym_addr) != 0:
-			return sym_addr
-
-
-		if '.' in arg:
-			return float(arg)
-		if arg.lower().startswith('0x'):
-			return int(arg, 16)
-		if arg.startswith('0') and all(c in string.octdigits for c in arg):
-			return int(arg, 8)
-#               if all(c in string.intdigits for c in arg): ### stupid python doesn't have string.intdigits?
-		if all(c in '0123456789' for c in arg):
-			return int(arg, 10)
-		return int(arg, 16)
-	except ValueError:
-		return 0
-
-def task_state_abbr(state):
-	if state is TASK_STATE.TASK_RUNNING: return "RU"
-	elif state == "TASK_RUNNING": return "RU"
-	elif state == "TASK_INTERRUPTIBLE": return "IN"
-	elif state == "TASK_UNINTERRUPTIBLE": return "UN"
-	elif state == "TASK_STOPPED": return "ST"
-	elif state == "TASK_TRACED": return "TR"
-
-	if state == "TASK_ZOMBIE": return "TZ"
-	if state == "EXIT_ZOMBIE": return "XZ"
-
-	if state == "EXIT_DEAD": return "XD"
-	if state == "TASK_DEAD": return "DE"
-
-	if state == "TASK_WAKEKILL|TASK_UNINTERRUPTIBLE": return "KU"
-
-	if state == "TASK_WAKEKILL": return "WK"
-	elif state == "TASK_WAKING": return "WA"
-	elif state == "TASK_PARKING": return "PK"
-	else:
-		return "?{}?".format(str(state))
 
 def show_task_line_generic(task, this_pid=None):
 
@@ -199,13 +127,9 @@ def rwsem_owner(rwsem):
 		o = (rwsem.owner.counter & 0xffffffffffffffff) & ~0x3
 		return readSU("struct task_struct", o)
 	except Exception as e:
-#		print("exception: {}".format(e))
 		pass
 	try:
 		return readSU("struct task_struct", rwsem.owner & ~0x3)
-#		thing = rwsem.owner & ~0x3
-#		print("returning the first thing: 0x{:016x}".format(thing))
-#		return readSU("struct task_struct", readU64(rwsem.owner) & ~0x3)
 	except:
 		pass
 	return 0
@@ -338,9 +262,6 @@ def show_rwsem(semaddr, btpid=None, btwaiter=None):
 
 	for w in wl:
 		task = w.task
-#		task = container_of(w.task, "struct task_struct", "wake_entry")
-#		task = container_of(w.task, "struct task_struct", "wake_entry")
-#		print("*** wake_entry at {:016x} or at {:016x} ??".format(w, task))
 		pid = -1
 		if task != 0 and task != 1:
 			try:
@@ -349,8 +270,6 @@ def show_rwsem(semaddr, btpid=None, btwaiter=None):
 				t = tt.getByTid(pid)
 				state = task_state_abbr(t.state)
 				lr = t.Last_ran
-#				basems = tt.basems
-#				delay = get_time_ms_pretty(basems - lr)
 				delay = get_time_ms_pretty(t.Ran_ago)
 			except Exception as e:
 				print("error: {}".format(e))
@@ -383,13 +302,6 @@ def display_rwsem_info(bts, rwsem_addr, waiter_addr, wqh_addr):
 	wqh = 0
 	waiter = 0
 
-#	if bts != 0:
-#		pid = bts.pid
-#		cmd = bts.cmd
-#	else:
-#		pid = None
-#		cmd = ""
-
 	rwsem = readSU("struct rw_semaphore", rwsem_addr)
 	try:
 		if wqh_addr:
@@ -398,15 +310,6 @@ def display_rwsem_info(bts, rwsem_addr, waiter_addr, wqh_addr):
 		wqh = False
 		pass
 
-#	waiter = readSU("struct rwsem_waiter", waiter_addr)
-#	if waiter_addr and pid:
-#		waiter = check_waiter_task_fuzzy(waiter_addr, pid)
-#	print("did we find an rwsem_waiter for pid {} with address {:016x}: {:016x}?".format(
-#		pid, waiter_addr, waiter))
-
-
-#	print("pid {} '{}' may have an rwsem at {:016x}, waiter at {:016x}, wake_q_head at {:016x}".format(
-#		pid, cmd, rwsem, waiter, wqh))
 	show_rwsem(rwsem, btpid=pid)
 	if waiter:
 		print("{}(struct rwsem_waiter *)0x{:016x}".format(ind(1), waiter))
@@ -428,12 +331,7 @@ def display_rwsem_info(bts, rwsem_addr, waiter_addr, wqh_addr):
 #	check_pid_rwsem_waitlist(pid, waiter, rwsem) ## might be easier to just check w in wq above
 
 
-
-
-
 #####
-
-pid_max_max = get_sym_addr("pid_max_max")
 
 if __name__ == "__main__":
 	opts_parser = argparse.ArgumentParser()
@@ -448,24 +346,11 @@ if __name__ == "__main__":
 	if args.debug:
 		debug_script = True
 
-#	if len(args.addrs) > 0:
-#		for arg in args.addrs:
-#			addr = get_arg_value(arg)
-#			if addr != 0:
-#				addr_is_symbol(addr)
-#				check_xfs_inode_locks(addr)
 	if len(args.rwsems) > 0:
 		for arg in args.rwsems:
 			addr = get_arg_value(arg)
 			if addr != 0:
 #				addr_is_symbol(addr)
 				display_rwsem_info(0, addr, 0, 0)
-#				check_xfs_inode_locks(addr)
-
-#	else:
-#		check_pids()
-
-
-
 
 # vim: sw=4 ts=4 noexpandtab
