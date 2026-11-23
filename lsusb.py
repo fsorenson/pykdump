@@ -62,32 +62,8 @@ try:
 except:
 	pass
 
-
-
 def indirect_to_ptr(ptr):
-#return (void *)((unsigned long)ptr & ~RADIX_TREE_INDIRECT_PTR);
 	return (long(ptr) & ~RADIX_TREE_INDIRECT_PTR)
-
-
-def radix_tree_nodes_orig(ptree):
-	first_rnode = readSU("struct radix_tree_node", indirect_to_ptr(ptree.rnode))
-	if (not first_rnode):
-		return []
-	pheight = ptree.height
-	_offset = member_offset("struct radix_tree_node", "slots")
-	_size = RADIX_TREE_MAP_SIZE * pointersize
-
-	def walk_radix_node(rnode, height):
-		arr = mem2long(readmem(rnode+_offset, _size), array=RADIX_TREE_MAP_SIZE)
-		for i, s in enumerate(arr):
-			if (not s):
-				continue
-			if (height == 1):
-				yield s
-			else:
-				for s1 in walk_radix_node(s, height-1):
-					yield s1
-	return walk_radix_node(long(first_rnode), pheight)
 
 def radix_tree_nodes(ptree):
 	ptree = readSU("struct radix_tree_node", ptree)
@@ -107,27 +83,6 @@ def struct__member_obj(struct_obj, member):
 	except:
 		pass
 	return None
-
-def display_generic_struct_member(addr, member_name, rlvl=0, ilvl=0):
-	member_obj = struct__member_obj(addr, member_name)
-	if member_obj == None:
-		return
-
-	try:
-		sym = member_obj.PYT_symbol
-		if sym.startswith('struct '):
-#			member_type = sym[7:]
-			print("{}.{} - ({} *)0x{:016x}".format(indent_str(ilvl), member_name, sym, long(member_obj)))
-			return
-	except AttributeError:
-		pass
-
-	if type(member_obj) == type(0):
-		print("{}.{} - {}".format(indent_str(ilvl), member_name, member_obj))
-	elif isinstance(member_obj, SmartString):
-		print("{}.{} - (char *){} - '{}'".format(indent_str(ilvl), member_name, member_obj.addr, member_obj))
-	else:
-		print("{}.{} - (unknown type: {}) 0x{:016x}".format(indent_str(ilvl), member_name, member_obj, long(member_obj)))
 
 def get_xarray_tree(xa):
 	ret = []
@@ -390,7 +345,6 @@ def usb_dump_config(speed, config, active):
 			break
 		usb_dump_iad_descriptor(config.intf_assoc[i])
 	try:
-#		print("{} interfaces".format(config.desc.bNumInterfaces))
 		for i in range(config.desc.bNumInterfaces):
 			intfc = config.intf_cache[i]
 			interface = config.interface[i]
@@ -406,8 +360,6 @@ def usb_dump_desc(dev):
 #		print("dump config for {}".format(i))
 		usb_dump_config(dev.speed, dev.config + i,
 			(dev.config + i) == dev.actconfig)
-
-
 
 def dev_get_drvdata(dev):
 	return dev.driver_data
@@ -497,8 +449,6 @@ def usb_device_dump(usbdev, bus, level, index, count):
 	except Exception as e:
 		print("exception in usb_device_dump: {}".format(e))
 
-
-
 	# look at each of the device's children:
 #	usb_hub_for_each_child(usbdev, chix, childdev) {
 #			ret = usb_device_dump(buffer, nbytes, skip_bytes,
@@ -507,6 +457,7 @@ def usb_device_dump(usbdev, bus, level, index, count):
 
 
 
+# this is really more like the 'usb-devices' program
 def do_display_usb_buses():
 	try:
 		usb_bus_idr = readSymbol("usb_bus_idr")
@@ -515,24 +466,10 @@ def do_display_usb_buses():
 		print("exception in do_display_usb_buses: {}".format(e))
 		return
 
-#	try:
-#		tree_addrs = get_xarray_tree(usb_bus_idr.idr_rt)
-#		print("xarray_tree: {}".format(len(tree_addrs)))
-#
-#		for bus in tree_addrs:
-#			bus = readSU("struct usb_bus", bus)
-#			print("(struct usb_bus *)0x{:016x}  bus: {} ({})".format(bus, bus.busnum, bus.bus_name))
-#	except:
-#		return
-
-
 	buses = []
 	try:
-#		print("thing 2")
 		for _id, val in idr_for_each(usb_bus_idr):
-#			print("id: {}\n".format(_id))
 			bus = readSU("struct usb_bus", val)
-#			print("thing: {}  0x{:016x}".format(bus.busnum, bus))
 			buses.append(bus)
 	except Exception as e:
 		print("exception in do_display_usb_buses: {}".format(e))
@@ -549,7 +486,6 @@ def do_display_usb_buses():
 
 
 if __name__ == "__main__":
-#	addr = get_arg_value(argv[x])
 	do_display_usb_buses()
 
 # vim: sw=4 ts=4 noexpandtab
