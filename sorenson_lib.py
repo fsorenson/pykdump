@@ -37,6 +37,10 @@ def defines_to_string(match_val, strings):
 
 def get_arg_value(arg):
 	try:
+		sym_addr = sym2addr(arg)
+		if not sym_addr == None:
+			return symaddr
+
 		if '.' in arg:
 			return float(arg)
 		if arg.lower().startswith('0x'):
