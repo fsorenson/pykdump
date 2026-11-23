@@ -50,7 +50,7 @@ def ffs(x):
 def get_arg_value(arg):
 	try:
 		sym_addr = sym2addr(arg)
-		if not sym_addr == None:
+		if not sym_addr == None and not sym_addr == 0:
 			return symaddr
 
 		if '.' in arg:
