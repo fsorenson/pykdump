@@ -258,7 +258,7 @@ def format_time_ms(ms):
 def format_time_s(s):
 	return format_time_ns(s * 1000 * 1000 * 1000)[:-10]
 
-def get_time_ms_pretty(t)
+def get_time_ms_pretty(t):
 	return format_time_ms(t)
 
 # vim: sw=4 ts=4 noexpandtab
