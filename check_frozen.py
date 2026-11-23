@@ -12,21 +12,6 @@ superBlocks = {}
 maxLen      = 0
 _MAXDEPTH_  = 15
 
-
-def get_time_ms_pretty_old(t):
-	ns = int((t % 1000) * 1000000)
-	s = int(t / 1000)
-	m = int(s / 60)
-	s %= 60
-	h = int(m / 60)
-	m %= 60
-	d = int(h / 24)
-	h %= 24
-	return "%d %2d:%02d:%02d.%09d" % (d, h, m, s, ns)
-
-def get_time_ms_pretty(t):
-	return pp_time_ms(t)
-
 def task_get_last_arrival_pretty(pid):
 	tt = TaskTable()
 	if (pid > INT_MAX):
