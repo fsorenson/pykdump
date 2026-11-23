@@ -229,4 +229,27 @@ else:
 		except:
 			return 0
 
+def format_time_ns(ns):
+	s = int(ns / 1000000000)
+	ns = int(ns % 1000000000)
+	m = int(s / 60)
+	s %= 60
+	h = int(m / 60)
+	m %= 60
+	d = int(h / 24)
+	h %= 24
+	return "%d %2d:%02d:%02d.%09d" % (d, h, m, s, ns)
+
+def format_time_us(us):
+	return format_time_ns(us * 1000)[:-3]
+
+def format_time_ms(ms):
+	return format_time_ns(ms * 1000 * 1000)[:-6]
+
+def format_time_s(s):
+	return format_time_ns(s * 1000 * 1000 * 1000)[:-10]
+
+def get_time_ms_pretty(t)
+	return format_time_ms(t)
+
 # vim: sw=4 ts=4 noexpandtab
