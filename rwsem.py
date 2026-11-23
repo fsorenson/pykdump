@@ -9,6 +9,7 @@ from LinuxDump.BTstack import exec_bt
 from pykdump.API import *
 from LinuxDump.KernLocks import (decode_mutex)
 import argparse
+import sorenson_lib
 
 debug_script = False
 
@@ -102,33 +103,6 @@ def task_state_abbr(state):
 	elif state == "TASK_PARKING": return "PK"
 	else:
 		return "?{}?".format(str(state))
-
-
-
-def pp_time_ns(ns):
-	s = int(ns / 1000000000)
-#	ns %= 1000000000
-	ns = int(ns % 1000000000)
-	m = int(s / 60)
-	s %= 60
-	h = int(m / 60)
-	m %= 60
-	d = int(h / 24)
-	h %= 24
-	return "%d %2d:%02d:%02d.%09d" % (d, h, m, s, ns)
-
-def pp_time_us(us):
-	return pp_time_ns(us * 1000)[:-3]
-
-def pp_time_ms(ms):
-	return pp_time_ns(ms * 1000 * 1000)[:-6]
-
-def pp_time_s(s):
-	return pp_time_ns(s * 1000 * 1000 * 1000)[:-10]
-
-def get_time_ms_pretty(t):
-	return pp_time_ms(t)
-
 
 def show_task_line_generic(task, this_pid=None):
 
