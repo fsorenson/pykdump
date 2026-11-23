@@ -13,6 +13,12 @@ from LinuxDump.Tasks import TaskTable
 from LinuxDump.fs.dcache import *
 from functools import wraps, partial
 
+try:
+	from pykdump.Generic import SUInfo
+except:
+	from pykdump.datatypes import SUInfo
+
+
 DEFAULT_RLVL = 3
 PAGE_SIZE = 4096
 
