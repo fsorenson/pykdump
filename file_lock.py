@@ -13,10 +13,9 @@ if __name__ == "__main__":
 				sys.path.append(p)
 
 from pykdump.API import *
-from pykdump.Generic import SUInfo
+from LinuxDump import percpu
 from LinuxDump.Tasks import TaskTable
 from LinuxDump.inet.proto import *
-#from libs.sorenson import *
 
 from sorenson_lib import *
 try:
@@ -123,11 +122,25 @@ FL_MAND_C = '''
 FL_MAND = CDefine(FL_MAND_C)
 
 OFFSET_MAX = 0x7FFFFFFFFFFFFFFF
+HAS_FL_CORE = struct_exists("struct file_lock_core")
+
+
+def fl_core(fl):
+	"""Return struct file_lock_core (fl.c) on Linux 6.9+, or fl itself on older kernels."""
+	fl = readSU("struct file_lock", fl)
+	return fl.c if HAS_FL_CORE else fl
+
+
+def flc_get(fl, suffix):
+	"""Read flc_<suffix> (6.9+) or fl_<suffix> (older kernels) from a struct file_lock."""
+	c = fl_core(fl)
+	return getattr(c, ("flc_" if HAS_FL_CORE else "fl_") + suffix)
+
 
 def check_fl_type(fl, type):
 	if fl:
 		try:
-			flags = readSU("struct file_lock", fl).fl_flags
+			flags = flc_get(fl, "flags")
 			return (flags & type) != 0
 		except Exception as ex:
 			pass
@@ -152,7 +165,7 @@ def fl_type_get_str(fl_type):
 
 def lease_breaking(fl):
 	try:
-		flags = readSU("struct file_lock", fl).fl_flags
+		flags = flc_get(fl, "flags")
 		return flags & (FL_TYPE['FL_UNLOCK_PENDING'] | FL_TYPE['FL_DOWNGRADE_PENDING'])
 	except Exception as ex:
 		pass
@@ -354,15 +367,21 @@ def pid_tsk(pid):
 		pass
 
 def show_blockers(blocker):
-	blocker = readSU("struct file_lock", blocker)
-	l = list_get_entries(blocker.fl_block, "file_lock", "fl_block")
-#	list_get_entries(lockowners, "nlm_lockowner", "list")
+	c = fl_core(blocker)
+	if HAS_FL_CORE:
+		l = list_get_entries(c.flc_blocked_requests, "file_lock_core", "flc_blocked_member")
+	else:
+		l = list_get_entries(c.fl_block, "file_lock", "fl_block")
 	for e in l:
 		print("blocker entry 0x{:016x}".format(e))
+
+
 def show_waiters(blocker):
-	blocker = readSU("struct file_lock", blocker)
-	l = list_get_entries(blocker.fl_wait.task_list, "file_lock", "fl_wait")
-#	list_get_entries(lockowners, "nlm_lockowner", "list")
+	c = fl_core(blocker)
+	if HAS_FL_CORE:
+		l = list_get_entries(c.flc_wait.head, "file_lock_core", "flc_wait")
+	else:
+		l = list_get_entries(c.fl_wait.task_list, "file_lock", "fl_wait")
 	for e in l:
 		print("blocker entry 0x{:016x}".format(e))
 
@@ -373,20 +392,23 @@ def lock_get_status(fl):
 #	print("lock_get_status(0x{:016x}))".format(fl))
 	try:
 		fl = readSU("struct file_lock", fl)
-		fl_pid = fl.fl_pid
+		c = fl_core(fl)
+		fl_pid = c.flc_pid if HAS_FL_CORE else c.fl_pid
+		fl_filp = c.flc_file if HAS_FL_CORE else c.fl_file
+		fl_flags = c.flc_flags if HAS_FL_CORE else c.fl_flags
+		fl_type = c.flc_type if HAS_FL_CORE else c.fl_type
 
-		if fl.fl_file:
-			inode = file_inode(fl.fl_file)
+		if fl_filp:
+			inode = file_inode(fl_filp)
 		else:
 			inode = 0
 
 #		print("    ", end='')
 		if IS_POSIX(fl):
-			fl_flags = fl.fl_flags
 #			mand_adv = "MANDATORY" if (inode and mandatory_lock(inode)) 
 			print("{:6s} {}".format("ACCESS" if (fl_flags & FL_TYPE['FL_ACCESS']) else "POSIX ", "*NOINODE*" if (inode == 0) else "MANDATORY" if mandatory_lock(inode) else "ADVISORY "), end='')
 		elif IS_FLOCK(fl):
-			if fl.fl_type & FL_MAND['LOCK_MAND']:
+			if fl_type & FL_MAND['LOCK_MAND']:
 				print("FLOCK  MSNFS     ", end='')
 			else:
 				print("FLOCK  ADVISORY  ", end='')
@@ -395,17 +417,17 @@ def lock_get_status(fl):
 		else:
 			print("UNKNOWN UNKNOWN  ", end='')
 
-		if fl.fl_type & FL_MAND['LOCK_MAND']:
-			if (fl.fl_type & FL_MAND['LOCK_READ']):
-				str = "RW   " if (fl.fl_type & FL_MAND['LOCK_WRITE']) else "READ "
+		if fl_type & FL_MAND['LOCK_MAND']:
+			if (fl_type & FL_MAND['LOCK_READ']):
+				str = "RW   " if (fl_type & FL_MAND['LOCK_WRITE']) else "READ "
 			else:
-				str = "WRITE" if (fl.fl_type & FL_MAND['LOCK_WRITE']) else "NONE "
+				str = "WRITE" if (fl_type & FL_MAND['LOCK_WRITE']) else "NONE "
 			print("{} ".format(str), end='')
 		else:
 			if (lease_breaking(fl)):
-				str = "UNLCK" if (fl.fl_type & FL_RDWR['F_UNLCK']) else "READ "
+				str = "UNLCK" if (fl_type & FL_RDWR['F_UNLCK']) else "READ "
 			else:
-				str = "WRITE" if (fl.fl_type & FL_RDWR['F_WRLCK']) else "READ "
+				str = "WRITE" if (fl_type & FL_RDWR['F_WRLCK']) else "READ "
 			print("{} ".format(str), end='')
 
 		# move pid display from here to later
@@ -433,19 +455,19 @@ def lock_get_status(fl):
 
 		print("{}owner pid={}, comm = '{}'".format(indent_str(2), fl_pid, comm))
 		try:
-			print_tasks_by_file(fl.fl_file)
+			print_tasks_by_file(fl_filp)
 		except Exception as ex:
 			print("error printing tasks for file_lock {:016x}: {}".format(fl, ex))
 			pass
 		show_lm_info(fl) # try to show lm-specific info
 
-#		show_filp_info(fl.fl_file)
+#		show_filp_info(fl_filp)
 #		print("")
-		if fl.fl_file:
-			fst = file_get_fstype_string(fl.fl_file)
+		if fl_filp:
+			fst = file_get_fstype_string(fl_filp)
 			if fst == "nfs" or fst=="nfs4":
 				try:
-					ctx = readSU("struct nfs_open_context", fl.fl_file.private_data)
+					ctx = readSU("struct nfs_open_context", fl_filp.private_data)
 					cred = ctx.cred
 					show_cred_short(cred)
 				except Exception as ex:
@@ -513,7 +535,7 @@ def show_nlm_lockowners(lockowners):
 
 def show_nlm_lockinfo(fl):
 	try:
-		nlm_host = readSU("struct nlm_host", fl.fl_owner)
+		nlm_host = readSU("struct nlm_host", flc_get(fl, "owner"))
 		print("{}(struct nlm_host *)0x{:016x}".format(indent_str(1), nlm_host), end='')
 
 		print(", '{}'".format(nlm_host.h_name), end='')
@@ -539,7 +561,7 @@ def show_nlm_lockinfo(fl):
 			pass
 
 		print("")
-		filp = fl.fl_file
+		filp = flc_get(fl, "file")
 
 	except crash.error as e:
 		print("An error occurred: {}".format(e))
@@ -547,7 +569,7 @@ def show_nlm_lockinfo(fl):
 
 def show_nfsd_posix_lockinfo(fl):
 	try:
-		nfs4_lockowner = readSU("struct nfs4_lockowner", fl.fl_owner)
+		nfs4_lockowner = readSU("struct nfs4_lockowner", flc_get(fl, "owner"))
 		nfs4_stateowner = nfs4_lockowner.lo_owner
 		nfs4_client = nfs4_stateowner.so_client
 
@@ -567,7 +589,7 @@ except Exception as ex:
 
 def show_nfsd_lease_lockinfo(fl):
 	try:
-		nfs4_lockowner = readSU("struct nfs4_lockowner", fl.fl_owner)
+		nfs4_lockowner = readSU("struct nfs4_lockowner", flc_get(fl, "owner"))
 		print("got the lo")
 		nfs4_stateowner = nfs4_lockowner.lo_owner
 		print("got the so")
@@ -580,9 +602,10 @@ def show_nfsd_lease_lockinfo(fl):
 		print("\t** TODO: lockowners **")
 
 		lock_type = "UNKNOWN"
-		if fl.fl_type == 0:
+		fl_type = flc_get(fl, "type")
+		if fl_type == 0:
 			lock_type = "F_RDLCK"
-		elif fl.fl_type == 1:
+		elif fl_type == 1:
 			lock_type = "F_WRLCK"
 
 		print("\tlease: {}".format(lock_type))
@@ -680,7 +703,7 @@ def show_inode_locks(inode, filp=0):
 			fl = next_fl
 			next_fl = fl.fl_next
 
-			if filp and (filp != fl.fl_file):
+			if filp and (filp != flc_get(fl, "file")):
 				continue
 
 			print("(struct file_lock *)0x{:016x} ".format(fl), end='')
@@ -690,8 +713,9 @@ def show_inode_locks(inode, filp=0):
 			except: pass
 
 			print("bar")
-			if fl.fl_owner:
-				print("\tfl.fl_owner=0x{:016x}".format(fl.fl_owner))
+			fl_owner = flc_get(fl, "owner")
+			if fl_owner:
+				print("\tfl_owner=0x{:016x}".format(fl_owner))
 #				continue
 			print("next_fl={:016x}".format(next_fl))
 	except crash.error as e:
@@ -724,26 +748,43 @@ def show_files_struct(fs):
 
 
 
-file_lock_list = readSymbol("file_lock_list")
-if is_percpu_symbol(file_lock_list):
-	def get_file_lock_list():
-		percpu = get_per_cpu()
-		lock_entries = []
+def is_percpu_symbol(symname):
+	"""Return True if symname is a per-CPU kernel symbol."""
+	try:
+		return "PER-CPU DATA TYPE:" in exec_crash_command("p {}".format(symname))
+	except Exception:
+		return False
 
-		for c in percpu.cpu.keys():
-			i_addr = percpu.per_cpu_struct(c, file_lock_list, "hlist_head")
-			try:
-				new_ents = hlist_get_entries(i_addr, "file_lock", "fl_link")
 
-				for e in new_ents:
-					lock_entries.append(e)
-			except Exception as ex:
-				print("error reading file lock list: {}".format(ex))
-				pass
-		return lock_entries
-else:
-	def get_file_lock_list():
-		return list_get_entries(file_lock_list, "file_lock", "fl_link")
+def get_file_lock_list():
+	"""Return all struct file_lock addresses from file_lock_list (per-CPU or global)."""
+	if is_percpu_symbol("file_lock_list"):
+		addrs = percpu.get_cpu_var("file_lock_list")
+		fll_type = "struct file_lock_list_struct" if struct_exists("struct file_lock_list_struct") else "struct hlist_head"
+		is_struct = struct_exists("struct file_lock_list_struct")
+	else:
+		addrs = [sym2addr("file_lock_list")]
+		fll_type = None
+		is_struct = False
+
+	# In Linux 6.9+, flc_link lives inside struct file_lock_core c
+	link_member = "c.flc_link" if struct_exists("struct file_lock_core") else "fl_link"
+	lock_entries = []
+
+	for addr in addrs:
+		try:
+			if is_struct:
+				fll = readSU(fll_type, addr)
+				lock_entries.extend(hlist_get_entries(fll.hlist, "file_lock", link_member))
+			elif fll_type:
+				hl = readSU("struct hlist_head", addr)
+				lock_entries.extend(hlist_get_entries(hl, "file_lock", link_member))
+			else:
+				lock_entries.extend(list_get_entries(addr, "file_lock", link_member))
+		except Exception as ex:
+			print("error reading file lock list: {}".format(ex))
+
+	return lock_entries
 
 def posix_owner_key(fl):
 	fl = readSU("struct file_lock", fl)
@@ -752,18 +793,21 @@ def posix_owner_key(fl):
 			fl, fl.fl_lmops.lm_owner_key))
 		return None
 	else:
-		print("fl: 0x{:016x}, fl.fl_owner: 0x{:016x}".format(fl, fl.fl_owner))
-		print("addr of fl.fl_owner: 0x{:016x}".format(Addr(fl.fl_owner)))
-		return Addr(fl.fl_owner)
+		owner = flc_get(fl, "owner")
+		print("fl: 0x{:016x}, fl_owner: 0x{:016x}".format(fl, owner))
+		print("addr of fl_owner: 0x{:016x}".format(Addr(owner)))
+		return Addr(owner)
 
 if symbol_exists("blocked_hash"):
 	def get_blocked_locks():
-		blocked_hash = readSymbol("blocked_hash")
+		bh_addr = sym2addr("blocked_hash")
+		hl_size = struct_size("struct hlist_head")
+		link_member = "c.flc_link" if HAS_FL_CORE else "fl_link"
 		blocked_locks = []
-		i = 0
 
-		for num, hl in enumerate(blocked_hash):
-			entries = hlist_get_entries(hl, "file_lock", "fl_link")
+		for num in range(128):
+			hl = readSU("struct hlist_head", bh_addr + num * hl_size)
+			entries = hlist_get_entries(hl, "file_lock", link_member)
 			for entry_addr in entries:
 				entry = readSU("struct file_lock", entry_addr)
 				blocked_locks.append(entry)
@@ -781,7 +825,7 @@ def show_file_lock(fl):
 		lock_get_status(fl)
 		try:
 			print("{}".format(indent_str(1)), end='')
-			filp = readSU("struct file_lock", fl).fl_file
+			filp = flc_get(fl, "file")
 
 			show_filp_info(filp)
 			print("")
