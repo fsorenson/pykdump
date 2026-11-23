@@ -252,68 +252,54 @@ def show_rwsem(semaddr, btpid=None, btwaiter=None):
 		wcount = count & 0xffffffff00000000
 		owner = rwsem_owner(s)
 
-#		owner_str = "unknown: 0x{:016x}".format(owner)
-
 		if reader_owned(s):
 			owner_str = ""
 			if anonymously_owned(s):
 				owner_str = "anonymous reader task - possibly:"
 
-			t = tt.getByTid(owner.pid)
-			if t:
-				state = task_state_abbr(t.state)
-				owner_str += "{} ({} - {:6d} - {})".format(owner, state, owner.pid, owner.comm)
+			if owner:
+				t = tt.getByTid(owner.pid)
+				if t:
+					state = task_state_str(t.state)
+					owner_str += "{} ({} - {:6d} - {})".format(owner, state, owner.pid, owner.comm)
+				else:
+					owner_str += "Invalid owner: 0x{:016x}".format(owner)
 			else:
-				owner_str += "Invalid owner: 0x{:016x}".format(owner)
+				owner_str += "reader-owned (no task ptr)"
 		elif count == 0:
 			owner_str = "unlocked?"
 		elif owner:
 			t = tt.getByTid(owner.pid)
 			if t:
-				state = task_state_abbr(t.state)
+				state = task_state_str(t.state)
 				owner_str = "Write owner {} ({} - {:6d} - {})".format(owner, state, owner.pid, owner.comm)
 			else:
 				owner_str = "Invalid owner: 0x{:016x}".format(owner)
 		else:
 			owner_str = "unknown: 0x{:016x}".format(owner)
 
-		wcount = "?"
-		rcount = "?"
-#		if wcount == 0xffffffff00000000:
-#			wcount = "writer (or write waiter)"
-#			if owner == 0x1:
-#				warning += "{}WARNING: rwsem potentially inconsistent: counter indicates writer may own semaphore, but owner says held by reader".format(ind(2))
-#		elif wcount == 0xfffffffe00000000:
-#			wcount = "writer (or write waiter) + write waiter"
-#			if owner == 0x1:
-#				warning += "{}WARNING: rwsem inconsistent: counter indicates writer owns semaphore, but owner says held by reader".format(ind(2))
-#		elif wcount == 0x0000000000000000:
-#			wcount = "none"
-#		else:
-#			wcount = "ERROR"
-
-
-		print("{}:".format(s))
-#	if not count:
-#		return
-
-#		print("owner: {}".format(owner))
-
-#		if owner == 0x0:
-#			owner_str = ""
-#		elif reader_owned(s):
-#			owner_str = "owned by a reader"
-#		else:
-#			t = tt.getByTid(owner.pid)
-#
-#			print("here 4")
-#			if t:
-#				state = task_state_abbr(t.state)
-#				owner_str = "Write owner {} ({} - {:6d} - {})".format(owner, state, owner.pid, owner.comm)
-#			else:
-#				owner_str = "Invalid owner: 0x{:016x}".format(owner)
-
-		print("{}{}, counter: 0x{:016x}".format(ind(2), owner_str, count & 0xffffffffffffffff))
+		ucount = count & 0xffffffffffffffff
+		if s.hasField("owner"):
+			# Modern rw_semaphore (Linux 5.3+):
+			#   bit 0 (0x1): RWSEM_WRITER_LOCKED
+			#   bit 1 (0x2): RWSEM_FLAG_WAITERS
+			#   bit 2 (0x4): RWSEM_FLAG_HANDOFF
+			#   bits 8+:     reader count (RWSEM_READER_SHIFT = 8)
+			wcount = 1 if (ucount & 0x1) else 0
+			rcount = ucount >> 8
+			cflags = []
+			if ucount & 0x1:
+				cflags.append("WRITER_LOCKED")
+			if ucount & 0x2:
+				cflags.append("WAITERS")
+			if ucount & 0x4:
+				cflags.append("HANDOFF")
+			cflags_str = "|".join(cflags) if cflags else "UNLOCKED"
+			print("{}:".format(s))
+			print("{}{}, counter: 0x{:016x} ({})".format(ind(2), owner_str, ucount, cflags_str))
+		else:
+			print("{}:".format(s))
+			print("{}{}, counter: 0x{:016x}".format(ind(2), owner_str, ucount))
 
 
 	except Exception as ex:
@@ -322,19 +308,23 @@ def show_rwsem(semaddr, btpid=None, btwaiter=None):
 		return
 
 	wl = []
-	print("{}wait_list: {:016x} ?".format(ind(2), s.wait_list))
 	try:
-#		if Addr(s.wait_list.next):
-#			wltemp = readList(Addr(s.wait_list.next))
-		if Addr(s.wait_list) and Addr(s.wait_list) != s.wait_list.next:
-			wltemp = readList(Addr(s.wait_list.next))
-			for w in wltemp:
-				if w == s.wait_list:
-					break
-				wl.append(readSU("struct rwsem_waiter", w))
+		if s.hasField("first_waiter"):
+			fw = Addr(s.first_waiter)
+			print("{}first_waiter: 0x{:016x}".format(ind(2), fw))
+			if fw:
+				for w in readList(fw, inchead=True):
+					wl.append(readSU("struct rwsem_waiter", w))
+		else:
+			print("{}wait_list: {:016x} ?".format(ind(2), s.wait_list))
+			if Addr(s.wait_list) and Addr(s.wait_list) != s.wait_list.next:
+				wltemp = readList(Addr(s.wait_list.next))
+				for w in wltemp:
+					if w == s.wait_list:
+						break
+					wl.append(readSU("struct rwsem_waiter", w))
 	except Exception as ex:
 		print("error reading rwsem_waiter list: {}".format(ex))
-		pass
 		return
 
 	tt = None
