@@ -64,6 +64,9 @@ If `PYKDUMPPATH` includes this directory, you can invoke scripts by name (`epyth
 - **`lsusb.py`** — `lsusb` and `usb-devices` inspector starting from `usb_bus_idr` (uses `usb.ids`).
   - Options: `-t` / `--tree`, `-v` / `--verbose`, `-U` / `--usb-devices` (switch to `usb-devices` format), `-i <usb.ids>`
 - **`lstopo.py`** — Displays CPU/NUMA/memory topology.
+- **`kmem_S.py`** — `kmem -S` replacement for Linux 7.1+ SLUB kernels with `cpu_sheaves`.
+  - Walks per-node `kmem_cache_node` partial/full slab lists, decodes slab freelists (including `CONFIG_SLAB_FREELIST_HARDENED`), and inspects per-CPU `slub_percpu_sheaves` and `node_barn` sheaves to classify objects as active or inactive.
+  - Options: `<cache>` (name or hex `struct kmem_cache` address), `-a` / `--active` (active objects only), `-i` / `--inactive` / `--free` (inactive objects only), `-q` / `--addresses-only` (one `0x...` address per line)
 - **`gfp.py`**, **`list_sb_memcg_lrus.py`**, **`dump_vma_file.py`** — Memory allocation, memcg LRU, and VMA helpers.
 
 ### Debugging & Shared Library
