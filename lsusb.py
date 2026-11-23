@@ -10,21 +10,12 @@ if __name__ == "__main__":
 		sys.path.append(mypath)
 
 from sorenson_lib import *
-from file import *
 from pykdump.API import *
 
 from LinuxDump.Tasks import TaskTable
 from LinuxDump.fs.dcache import *
 from LinuxDump.trees import *
 from LinuxDump.idr import *
-
-
-def ffs(x):
-	"""Returns the index, counting from 1, of the
-	least significant set bit in `x`.
-	"""
-	return (x&-x).bit_length()
-
 
 #crash> list -H usb_bus_list -o usb_bus.bus_list -s usb_bus.busnum,bus_name,usbfs_dentry -r
 #ffff880c288df738

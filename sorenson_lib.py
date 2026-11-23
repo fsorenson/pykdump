@@ -41,6 +41,12 @@ def defines_to_string(match_val, strings):
 			return name
 	return "UNKNOWN"
 
+def ffs(x):
+	"""Returns the index, counting from 1, of the
+	least significant set bit in `x`.
+	"""
+	return (x&-x).bit_length()
+
 def get_arg_value(arg):
 	try:
 		sym_addr = sym2addr(arg)
