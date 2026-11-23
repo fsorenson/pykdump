@@ -51,7 +51,7 @@ def show_task_line_generic(task, this_pid=None):
 		return
 
 	comm = task.comm
-	state = task_state_abbr(t.state)
+	state = task_state_str(t.state)
 	lr = t.Last_ran
 	basems = tt.basems
 	delay = get_time_ms_pretty(basems - lr)
@@ -268,7 +268,7 @@ def show_rwsem(semaddr, btpid=None, btwaiter=None):
 				pid = task.pid
 				comm = task.comm
 				t = tt.getByTid(pid)
-				state = task_state_abbr(t.state)
+				state = task_state_str(t.state)
 				lr = t.Last_ran
 				delay = get_time_ms_pretty(t.Ran_ago)
 			except Exception as e:
